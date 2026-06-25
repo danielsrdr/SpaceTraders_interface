@@ -16,27 +16,19 @@ import {
 import {
   ACESFilmicToneMapping,
   AmbientLight,
-  BufferGeometry,
   Clock,
   Color,
-  Float32BufferAttribute,
   Frustum,
   Group,
   HemisphereLight,
-  Line,
-  LineBasicMaterial,
   Matrix4,
   Mesh,
-  MeshBasicMaterial,
   Object3D,
   PerspectiveCamera,
   PointLight,
-  QuadraticBezierCurve3,
   Raycaster,
-  RingGeometry,
   Scene,
   ShaderMaterial,
-  SphereGeometry,
   SRGBColorSpace,
   Vector2,
   Vector3,
@@ -81,12 +73,11 @@ import {
 } from './three/orbit-rings.builder';
 import { buildSystemSun } from './three/system-sun.builder';
 import { SystemOrbitEngine } from './three/system-orbit.engine';
-import {
-  computeSystemLayout3d,
-  shipMarkerScale,
-  shipOrbitDistance,
-  SystemLayout3d,
-} from './three/system-scene.layout';
+import { computeSystemLayout3d, shipOrbitDistance, SystemLayout3d } from './three/system-scene.layout';
+import { LandingAnimation } from './three/landing-animation';
+import { computeMarkerSignature, ShipMarkerManager } from './three/ship-marker.manager';
+import { TransitArcManager } from './three/transit-arc.manager';
+import { orientAlongArc, sampleTransitArc } from './three/transit-arc.math';
 import { disposeObject3D } from './three/three-dispose.util';
 
 interface PlanetEntry {
@@ -109,30 +100,6 @@ interface AnimatedMaterialEntry {
   gate: boolean;
 }
 
-interface DockedShipMarkerData {
-  kind: 'docked';
-  ship: ShipData;
-  waypointSymbol: string;
-  orbitIndex: number;
-  orbitTotal: number;
-}
-
-interface TransitShipMarkerData {
-  kind: 'transit';
-  ship: ShipData;
-  originSymbol: string;
-  destSymbol: string;
-}
-
-type ShipMarkerData = DockedShipMarkerData | TransitShipMarkerData;
-
-interface TransitArcData {
-  ship: ShipData;
-  curve: QuadraticBezierCurve3;
-  line: Line;
-  dot: Mesh;
-}
-
 export type { PlanetScreenLabel };
 
 export interface GodViewTooltip {
@@ -148,12 +115,6 @@ const GOD_VIEW_FILTERS: GodViewFilter[] = ['important', 'all', 'markets', 'ships
 
 /** Orbital-motion time-warp multipliers (0 = paused). */
 const TIME_SCALE_OPTIONS = [0, 1, 10, 100] as const;
-
-const BLIP_SELECTED_COLOR = 0xfbbf24;
-const BLIP_DOCKED_COLOR = 0x38bdf8;
-const BLIP_TRANSIT_COLOR = 0x5eead4;
-
-const ARC_SEGMENTS = 36;
 
 /** Player ship is rendered at full scale (~4 units); shrink it so it reads as a
  * small vessel next to celestial bodies (MOON r=2.5, PLANET r=5). */
@@ -239,13 +200,11 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   /** Viewer-side fill light that tracks the camera so ships never silhouette. */
   private headLight: PointLight | null = null;
   private readonly systemCenter = new Vector3(0, 0, 0);
-  private shipMarkers = new Group();
-  private shipBlips = new Group();
-  private transitArcs = new Group();
+  private readonly shipMarkers = new ShipMarkerManager();
+  private readonly transit = new TransitArcManager();
+  private readonly landing = new LandingAnimation();
   /** Structural fingerprint of the last-built marker set; skips redundant rebuilds. */
   private lastMarkerSignature: string | null = null;
-  private readonly arcScratch = new Vector3();
-  private readonly arcMid = new Vector3();
   private readonly orbitEngine = new SystemOrbitEngine();
   private layout: SystemLayout3d = {
     scale: 2,
@@ -287,26 +246,17 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private pointerDownX = 0;
   private pointerDownY = 0;
 
-  private landingProgress = 0;
-  private landingFrom = new Vector3();
-  private landingTo = new Vector3();
-  private landingTarget: PlanetEntry | null = null;
-  private landingEmitted = false;
-
   private readonly cameraOffset = new Vector3(0, 4, 11);
   private readonly tempVec = new Vector3();
   private followPosition = new Vector3();
 
   // Pre-allocated scratch vectors reused every frame to avoid GC pressure.
-  private readonly markerOriginPos = new Vector3();
-  private readonly markerDestPos = new Vector3();
   private readonly camOffsetScratch = new Vector3();
   private readonly camTargetScratch = new Vector3();
   private readonly viewOffsetScratch = new Vector3();
   private readonly shipResolveA = new Vector3();
   private readonly shipResolveB = new Vector3();
   private readonly shipResolveResult = new Vector3();
-  private readonly landingOffsetScratch = new Vector3();
   private readonly xAxis = new Vector3(1, 0, 0);
   private readonly yAxis = new Vector3(0, 1, 0);
 
@@ -482,8 +432,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.detachListeners();
     this.resizeObserver?.disconnect();
     this.clearPlanets();
-    this.clearShipBlips();
-    this.clearTransitArcs();
+    this.shipMarkers.dispose();
+    this.transit.dispose();
     if (this.shipGroup) disposeShip(this.shipGroup);
     this.surfaceBaker?.dispose();
     this.composer?.dispose();
@@ -562,17 +512,9 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.shipGroup = new Group();
     this.scene.add(this.shipGroup);
 
-    this.shipMarkers = new Group();
-    this.shipMarkers.name = 'ship-markers';
-    this.scene.add(this.shipMarkers);
-
-    this.shipBlips = new Group();
-    this.shipBlips.name = 'ship-blips';
-    this.scene.add(this.shipBlips);
-
-    this.transitArcs = new Group();
-    this.transitArcs.name = 'transit-arcs';
-    this.scene.add(this.transitArcs);
+    this.scene.add(this.shipMarkers.markers);
+    this.scene.add(this.shipMarkers.blips);
+    this.scene.add(this.transit.arcs);
 
     this.setupComposer();
     this.refreshAnimatedMaterials();
@@ -643,163 +585,6 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.scene?.add(this.shipGroup);
     this.shipGroup.position.copy(this.followPosition);
     this.shipGroup.visible = !!this.selectedShipSymbol();
-  }
-
-  private shipMarkerScaleForRole(role: string, baseScale: number): number {
-    const profile = role === 'SATELLITE' ? 0.6 : 1;
-    return baseScale * profile;
-  }
-
-  private createShipMarker(ship: ShipData, baseScale: number): Group {
-    const marker = buildProceduralShip(ship.registration.role).root;
-    const finalScale = this.shipMarkerScaleForRole(ship.registration.role, baseScale);
-    marker.scale.setScalar(finalScale);
-    marker.userData['ship'] = ship;
-    marker.userData['baseScale'] = finalScale;
-    marker.userData['pulsePhase'] = this.markerPulsePhase(ship.symbol);
-    return marker;
-  }
-
-  private markerPulsePhase(symbol: string): number {
-    let hash = 0;
-    for (let i = 0; i < symbol.length; i++) {
-      hash = (hash * 31 + symbol.charCodeAt(i)) >>> 0;
-    }
-    return (hash % 1000) / 1000;
-  }
-
-  private createShipBlip(radius: number, color: number): Mesh {
-    const blip = new Mesh(
-      new RingGeometry(radius * 0.68, radius, 28),
-      new MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.5,
-        depthWrite: false,
-      }),
-    );
-    blip.rotation.x = -Math.PI / 2;
-    return blip;
-  }
-
-  private clearShipBlips(): void {
-    while (this.shipBlips.children.length) {
-      const child = this.shipBlips.children[0]!;
-      this.shipBlips.remove(child);
-      disposeObject3D(child);
-    }
-  }
-
-  private createTransitArc(ship: ShipData, color: number): Group {
-    const positions = new Float32Array((ARC_SEGMENTS + 1) * 3);
-    const geometry = new BufferGeometry();
-    geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
-    const line = new Line(
-      geometry,
-      new LineBasicMaterial({ color, transparent: true, opacity: 0.45, depthWrite: false }),
-    );
-    const dot = new Mesh(
-      new SphereGeometry(1.1, 12, 12),
-      new MeshBasicMaterial({ color, transparent: true, opacity: 0.95, depthWrite: false }),
-    );
-    const group = new Group();
-    group.add(line);
-    group.add(dot);
-    group.userData['arc'] = {
-      ship,
-      curve: new QuadraticBezierCurve3(),
-      line,
-      dot,
-    } satisfies TransitArcData;
-    return group;
-  }
-
-  private clearTransitArcs(): void {
-    while (this.transitArcs.children.length) {
-      const child = this.transitArcs.children[0]!;
-      this.transitArcs.remove(child);
-      disposeObject3D(child);
-    }
-  }
-
-  /**
-   * Point on a transit arc at progress `t`, matching the drawn line exactly:
-   * a quadratic bezier whose control point is the origin/dest midpoint lifted
-   * in Y by `max(6, dist * 0.18)` (see {@link updateTransitArcs}). Both the
-   * marker and the camera-followed ship sample this so they ride the line.
-   */
-  private sampleTransitArc(v0: Vector3, v2: Vector3, t: number, target: Vector3): Vector3 {
-    const lift = Math.max(6, v0.distanceTo(v2) * 0.18);
-    const mx = (v0.x + v2.x) * 0.5;
-    const my = (v0.y + v2.y) * 0.5 + lift;
-    const mz = (v0.z + v2.z) * 0.5;
-    const u = 1 - t;
-    const a = u * u;
-    const b = 2 * u * t;
-    const c = t * t;
-    return target.set(
-      a * v0.x + b * mx + c * v2.x,
-      a * v0.y + b * my + c * v2.y,
-      a * v0.z + b * mz + c * v2.z,
-    );
-  }
-
-  /**
-   * Yaw/pitch a transit object so its nose (the procedural hull faces -Z)
-   * points along the arc's tangent at progress `t`. Uses a look-ahead sample
-   * on the same bezier the line is drawn from, so the ship banks into the curve.
-   */
-  private orientAlongArc(obj: Object3D, v0: Vector3, v2: Vector3, t: number): void {
-    const ahead = this.sampleTransitArc(v0, v2, Math.min(1, t + 0.03), this.tempVec);
-    if (ahead.distanceToSquared(obj.position) < 1e-5) return;
-    obj.lookAt(ahead);
-    obj.rotateY(Math.PI);
-  }
-
-  private updateTransitArcs(elapsed: number): void {
-    const dotPulse = 1 + Math.sin(elapsed * 6) * 0.25;
-    for (const group of this.transitArcs.children) {
-      const arc = group.userData['arc'] as TransitArcData | undefined;
-      if (!arc) continue;
-      const route = arc.ship.nav.route;
-      if (!route) continue;
-
-      this.orbitEngine.getWorldPosition(route.origin.symbol, arc.curve.v0);
-      this.orbitEngine.getWorldPosition(route.destination.symbol, arc.curve.v2);
-      const dist = arc.curve.v0.distanceTo(arc.curve.v2);
-      this.arcMid.addVectors(arc.curve.v0, arc.curve.v2).multiplyScalar(0.5);
-      this.arcMid.y += Math.max(6, dist * 0.18);
-      arc.curve.v1.copy(this.arcMid);
-
-      const geometry = arc.line.geometry as BufferGeometry;
-      const attr = geometry.getAttribute('position') as Float32BufferAttribute;
-      for (let i = 0; i <= ARC_SEGMENTS; i++) {
-        arc.curve.getPoint(i / ARC_SEGMENTS, this.arcScratch);
-        attr.setXYZ(i, this.arcScratch.x, this.arcScratch.y, this.arcScratch.z);
-      }
-      attr.needsUpdate = true;
-
-      arc.curve.getPoint(getTransitProgress(route), this.arcScratch);
-      arc.dot.position.copy(this.arcScratch);
-      arc.dot.scale.setScalar(dotPulse);
-    }
-  }
-
-  private animateShipMarkers(elapsed: number): void {
-    for (const child of this.shipMarkers.children) {
-      const baseScale = child.userData['baseScale'] as number | undefined;
-      const phase = (child.userData['pulsePhase'] as number | undefined) ?? 0;
-      if (baseScale !== undefined) {
-        const breathe = 1 + Math.sin(elapsed * 4 + phase * Math.PI * 2) * 0.08;
-        child.scale.setScalar(baseScale * breathe);
-      }
-      const blip = child.userData['blip'] as Mesh | undefined;
-      if (blip) {
-        const ping = (((elapsed * 0.65 + phase) % 1) + 1) % 1;
-        blip.scale.setScalar(0.6 + ping * 1.4);
-        (blip.material as MeshBasicMaterial).opacity = Math.max(0, (1 - ping) * 0.55);
-      }
-    }
   }
 
   private applyBodySpin(warpedDelta: number): void {
@@ -929,117 +714,15 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     // render loop — not by these markers. Rebuilding every procedural hull on
     // each poll is what makes navigation stutter, so skip the expensive
     // teardown unless the fleet's *structure* actually changed.
-    const signature = this.computeMarkerSignature(onMap, systemSymbol, selected);
+    const signature = computeMarkerSignature(onMap, systemSymbol, selected);
     if (signature === this.lastMarkerSignature) return;
     this.lastMarkerSignature = signature;
 
-    while (this.shipMarkers.children.length) {
-      const child = this.shipMarkers.children[0];
-      this.shipMarkers.remove(child);
-      disposeShip(child);
-    }
-    this.clearShipBlips();
-    this.clearTransitArcs();
+    this.shipMarkers.rebuild(onMap, selected, this.planetByName);
+    this.transit.rebuild(onMap, selected, this.planetByName);
 
-    const byWaypoint = new Map<string, ShipData[]>();
-
-    for (const ship of onMap) {
-      if (shipInTransit(ship)) continue;
-      const key = ship.nav.waypointSymbol;
-      const list = byWaypoint.get(key) ?? [];
-      list.push(ship);
-      byWaypoint.set(key, list);
-    }
-
-    for (const [waypointSymbol, shipsAt] of byWaypoint) {
-      const entry = this.planetByName.get(waypointSymbol);
-      if (!entry) continue;
-
-      shipsAt.forEach((ship, index) => {
-        const isSelected = ship.symbol === selected;
-        // The selected ship is already drawn as the camera-followed shipGroup;
-        // skip its marker so it doesn't render twice.
-        if (isSelected) return;
-        const marker = this.createShipMarker(ship, shipMarkerScale(entry.radius, isSelected));
-        marker.userData['markerData'] = {
-          kind: 'docked',
-          ship,
-          waypointSymbol,
-          orbitIndex: index,
-          orbitTotal: shipsAt.length,
-        } satisfies DockedShipMarkerData;
-        if (isSelected) {
-          marker.userData['selected'] = true;
-        }
-        const blip = this.createShipBlip(
-          Math.max(2.5, entry.radius * 0.5),
-          isSelected ? BLIP_SELECTED_COLOR : BLIP_DOCKED_COLOR,
-        );
-        marker.userData['blip'] = blip;
-        this.shipBlips.add(blip);
-        this.shipMarkers.add(marker);
-      });
-    }
-
-    for (const ship of onMap.filter(shipInTransit)) {
-      const route = ship.nav.route;
-      if (!route) continue;
-      const originPlanet = this.planetByName.get(route.origin.symbol);
-      const destPlanet = this.planetByName.get(route.destination.symbol);
-      if (!originPlanet || !destPlanet) continue;
-
-      const isSelected = ship.symbol === selected;
-      // The selected ship is drawn as the camera-followed shipGroup, so skip its
-      // duplicate marker — but still draw its arc so it visibly rides the line.
-      if (!isSelected) {
-        const marker = this.createShipMarker(ship, shipMarkerScale(originPlanet.radius, isSelected));
-        marker.userData['markerData'] = {
-          kind: 'transit',
-          ship,
-          originSymbol: route.origin.symbol,
-          destSymbol: route.destination.symbol,
-        } satisfies TransitShipMarkerData;
-        marker.userData['ship'] = ship;
-        const blip = this.createShipBlip(
-          Math.max(2.5, originPlanet.radius * 0.5),
-          BLIP_TRANSIT_COLOR,
-        );
-        marker.userData['blip'] = blip;
-        this.shipBlips.add(blip);
-        this.shipMarkers.add(marker);
-      }
-
-      const arc = this.createTransitArc(ship, isSelected ? BLIP_SELECTED_COLOR : BLIP_TRANSIT_COLOR);
-      if (isSelected) {
-        (arc.userData['arc'] as TransitArcData).dot.visible = false;
-      }
-      this.transitArcs.add(arc);
-    }
-
-    this.applyShipMarkerPositions();
+    this.shipMarkers.applyPositions(this.orbitEngine, this.planetByName);
     this.syncFollowShip(fleet, systemSymbol);
-  }
-
-  /**
-   * Structural fingerprint of the on-map fleet (identity, role, status, location
-   * and transit route). Excludes transit *progress*, which animates per-frame,
-   * so polling that only advances ETA does not trigger a marker rebuild.
-   */
-  private computeMarkerSignature(
-    onMap: ShipData[],
-    systemSymbol: string,
-    selected: string | null,
-  ): string {
-    const parts = onMap
-      .map((s) => {
-        const route = s.nav.route;
-        const leg = shipInTransit(s) && route
-          ? `${route.origin.symbol}>${route.destination.symbol}`
-          : '';
-        return `${s.symbol}|${s.registration.role}|${s.nav.status}|${s.nav.waypointSymbol}|${leg}`;
-      })
-      .sort();
-    return `${systemSymbol}#${selected ?? ''}#${parts.join(',')}`;
   }
 
   private syncLayoutDisplayPositions(): void {
@@ -1068,62 +751,15 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       syncEphemerisTrails(this.ephemerisTrailsGroup, this.orbitEngine.getAllPositions());
     }
 
-    this.applyShipMarkerPositions();
+    this.shipMarkers.applyPositions(this.orbitEngine, this.planetByName);
 
-    if (this.landingActive() && this.landingTarget) {
-      this.orbitEngine.getWorldPosition(this.landingTarget.planet.name, this.landingTo);
-      this.landingTo.add(
-        this.landingOffsetScratch.set(0, this.landingTarget.radius * 0.5, this.landingTarget.radius + 2),
-      );
+    if (this.landingActive() && this.landing.target) {
+      this.orbitEngine.getWorldPosition(this.landing.target.name, this.tempVec);
+      this.landing.retarget(this.tempVec);
     }
 
     if (this.cameraMode() === 'flight' && !this.landingActive()) {
       this.syncFollowShip(this.ships(), this.systemSymbol());
-    }
-  }
-
-  private applyShipMarkerPositions(): void {
-    const originPos = this.markerOriginPos;
-    const destPos = this.markerDestPos;
-
-    for (const child of this.shipMarkers.children) {
-      const data = child.userData['markerData'] as ShipMarkerData | undefined;
-      if (!data) continue;
-
-      if (data.kind === 'docked') {
-        const entry = this.planetByName.get(data.waypointSymbol);
-        if (!entry) continue;
-        const orbitR = shipOrbitDistance(entry.radius);
-        const offset = shipOrbitOffset(data.orbitIndex, data.orbitTotal, orbitR);
-        this.orbitEngine.getWorldPosition(data.waypointSymbol, originPos);
-        child.position.set(
-          originPos.x + offset.x,
-          originPos.y + entry.radius * 0.35 + 1.5,
-          originPos.z + offset.y,
-        );
-        this.syncBlipToMarker(child);
-        continue;
-      }
-
-      const route = data.ship.nav.route;
-      if (!route) continue;
-      const originEntry = this.planetByName.get(data.originSymbol);
-      const destEntry = this.planetByName.get(data.destSymbol);
-      if (!originEntry || !destEntry) continue;
-
-      const t = getTransitProgress(route);
-      this.orbitEngine.getWorldPosition(data.originSymbol, originPos);
-      this.orbitEngine.getWorldPosition(data.destSymbol, destPos);
-      this.sampleTransitArc(originPos, destPos, t, child.position);
-      this.orientAlongArc(child, originPos, destPos, t);
-      this.syncBlipToMarker(child);
-    }
-  }
-
-  private syncBlipToMarker(marker: Object3D): void {
-    const blip = marker.userData['blip'] as Mesh | undefined;
-    if (blip) {
-      blip.position.set(marker.position.x, marker.position.y - 0.4, marker.position.z);
     }
   }
 
@@ -1151,7 +787,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
         const t = getTransitProgress(route);
         this.orbitEngine.getWorldPosition(route.origin.symbol, this.shipResolveA);
         this.orbitEngine.getWorldPosition(route.destination.symbol, this.shipResolveB);
-        this.orientAlongArc(this.shipGroup, this.shipResolveA, this.shipResolveB, t);
+        orientAlongArc(this.shipGroup, this.shipResolveA, this.shipResolveB, t, this.tempVec);
         return;
       }
     }
@@ -1167,7 +803,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
         const t = getTransitProgress(route);
         this.orbitEngine.getWorldPosition(route.origin.symbol, this.shipResolveA);
         this.orbitEngine.getWorldPosition(route.destination.symbol, this.shipResolveB);
-        this.sampleTransitArc(this.shipResolveA, this.shipResolveB, t, this.shipResolveResult);
+        sampleTransitArc(this.shipResolveA, this.shipResolveB, t, this.shipResolveResult);
         return this.shipResolveResult;
       }
     }
@@ -1208,14 +844,14 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       this.zone.run(() => this.landingComplete.emit());
       return;
     }
-    this.landingTarget = entry;
-    this.landingProgress = 0;
-    this.landingEmitted = false;
     this.landingFade.set(0);
     this.shakeSeed = Math.random() * 1000;
-    this.landingFrom.copy(this.shipGroup.position);
-    this.orbitEngine.getWorldPosition(planet.name, this.landingTo);
-    this.landingTo.add(this.landingOffsetScratch.set(0, entry.radius * 0.5, entry.radius + 2));
+    this.orbitEngine.getWorldPosition(planet.name, this.tempVec);
+    this.landing.start(
+      this.shipGroup.position,
+      { name: planet.name, radius: entry.radius },
+      this.tempVec,
+    );
   }
 
   private attachListeners(): void {
@@ -1383,10 +1019,10 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
   private handleClick(): void {
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const shipHits = this.raycaster.intersectObjects(this.shipMarkers.children, true);
+    const shipHits = this.raycaster.intersectObjects(this.shipMarkers.markers.children, true);
     for (const hit of shipHits) {
       let obj = hit.object;
-      while (obj.parent && obj.parent !== this.shipMarkers) {
+      while (obj.parent && obj.parent !== this.shipMarkers.markers) {
         obj = obj.parent;
       }
       const ship = obj.userData['ship'] as ShipData | undefined;
@@ -1473,21 +1109,16 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       this.applyBodySpin(warpedDelta);
       this.applyPlanetLod();
       this.updateAnimatedMaterials(elapsed);
-      this.animateShipMarkers(elapsed);
-      this.updateTransitArcs(elapsed);
+      this.shipMarkers.animate(elapsed);
+      this.transit.update(elapsed, this.orbitEngine);
 
-      if (this.landingActive() && this.landingTarget) {
-        this.landingProgress = Math.min(1, this.landingProgress + delta / 1.5);
-        const eased = this.easeInOut(this.landingProgress);
-        this.shipGroup.position.lerpVectors(this.landingFrom, this.landingTo, eased);
-        this.shipGroup.lookAt(this.orbitEngine.getWorldPosition(this.landingTarget.planet.name, this.tempVec));
-        const fade = Math.min(1, Math.max(0, (this.landingProgress - 0.4) / 0.6));
-        this.landingFade.set(Math.pow(fade, 1.2));
-        if (this.landingProgress >= 1) {
-          if (!this.landingEmitted) {
-            this.landingEmitted = true;
-            this.zone.run(() => this.landingComplete.emit());
-          }
+      if (this.landingActive() && this.landing.target) {
+        const frame = this.landing.update(delta);
+        this.shipGroup.position.copy(frame.position);
+        this.shipGroup.lookAt(this.orbitEngine.getWorldPosition(this.landing.target.name, this.tempVec));
+        this.landingFade.set(frame.fade);
+        if (frame.done) {
+          this.zone.run(() => this.landingComplete.emit());
         }
       } else if (this.landingFade() !== 0) {
         this.landingFade.set(0);
@@ -1657,8 +1288,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     const now = performance.now();
     let amp = now < this.shakeUntil ? 0.35 * ((this.shakeUntil - now) / 320) : 0;
 
-    if (this.landingActive() && this.landingTarget && !this.prefersReducedMotion()) {
-      amp = Math.max(amp, 0.12 + this.landingProgress * 0.55);
+    if (this.landingActive() && this.landing.target && !this.prefersReducedMotion()) {
+      amp = Math.max(amp, 0.12 + this.landing.descentProgress * 0.55);
     }
 
     if (amp <= 0) return;
@@ -1779,9 +1410,5 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
         return filter;
       }
     }
-  }
-
-  private easeInOut(t: number): number {
-    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
   }
 }
