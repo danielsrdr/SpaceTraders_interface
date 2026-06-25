@@ -1,0 +1,15 @@
+<div
+  class="relative min-h-screen bg-cover bg-no-repeat"
+  [style.background-image]="background.backgroundImage()"
+>
+  <audio loop hidden>
+    <source src="/assets/sounds/skamkraft_main_theme.mp3" type="audio/mpeg" />
+  </audio>
+  <app-side-nav />
+  <main class="m-0 h-screen w-full p-0">
+    <router-outlet />
+  </main>
+  <app-snackbar />
+  <app-confirm-dialog />
+  <app-logbook-drawer />
+</div>

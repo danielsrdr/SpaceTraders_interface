@@ -1,0 +1,11 @@
+@if (dialogService.dialog(); as dlg) {
+  <div class="fixed inset-0 z-[9998] bg-black/70" (click)="dialogService.close()"></div>
+  <dialog
+    class="fixed top-1/2 left-1/2 z-[9999] min-w-80 max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[10px] border-2 border-accent bg-black/95 p-6 text-white"
+    open
+  >
+    <h2 class="mt-0 text-accent">{{ dlg.title }}</h2>
+    <p class="leading-normal whitespace-pre-line">{{ dlg.message }}</p>
+    <button type="button" class="sk-btn" (click)="dialogService.confirm()">OK</button>
+  </dialog>
+}

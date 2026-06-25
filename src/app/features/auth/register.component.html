@@ -1,0 +1,41 @@
+<div class="sk-page-center">
+  <div class="flex w-[300px] flex-col items-center rounded-[5px] bg-black p-[30px]">
+    <p class="text-[50px]">REGISTER</p>
+    <input
+      type="text"
+      placeholder="Account token"
+      class="sk-input w-full"
+      [formField]="registerForm.accountToken"
+    />
+    <input
+      type="text"
+      placeholder="Agent name"
+      class="sk-input w-full"
+      [formField]="registerForm.name"
+    />
+    <select class="sk-select w-full" [formField]="registerForm.faction">
+      <option value="">Select faction</option>
+      @for (f of factions(); track f.symbol) {
+        <option [value]="f.symbol" [disabled]="!f.isRecruiting">{{ f.symbol }}</option>
+      }
+    </select>
+    <div class="flex w-full justify-between text-xl">
+      <p>Remember me ?</p>
+      <input type="checkbox" class="sk-input" [formField]="registerForm.remember" />
+    </div>
+    <div>
+      <button type="button" class="sk-btn" (click)="submit()" [disabled]="loading()">Validate</button>
+      <button type="button" class="sk-btn" (click)="cancel()">Cancel</button>
+    </div>
+    <div>
+      <button type="button" class="sk-btn" routerLink="/login">Login</button>
+    </div>
+    @if (errors().length) {
+      <div class="text-red-500">
+        @for (err of errors(); track err) {
+          <p>{{ err }}</p>
+        }
+      </div>
+    }
+  </div>
+</div>

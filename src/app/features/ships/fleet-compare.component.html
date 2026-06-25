@@ -1,0 +1,79 @@
+@if (!ships().length) {
+  <div class="sk-page-center"><p class="text-sm text-white/75">No ships to compare.</p></div>
+} @else {
+  <div class="mx-auto flex h-full w-full max-w-6xl flex-col gap-4 overflow-y-auto px-4 pt-20 pb-6 text-white">
+    <div class="grid gap-4 md:grid-cols-2">
+      <div class="flex flex-col items-center">
+        <select
+          class="sk-select w-full max-w-xs"
+          [ngModel]="aShip()?.symbol ?? ''"
+          (ngModelChange)="aSymbol.set($event)"
+        >
+          @for (s of ships(); track s.symbol) {
+            <option [value]="s.symbol">{{ s.symbol }}</option>
+          }
+        </select>
+        @if (aShip(); as ship) {
+          <app-ship-viewer-3d class="mt-2 block h-[min(38vh,320px)] w-full" [ship]="ship" />
+          <p class="mt-1 text-center text-xs text-white/70">
+            {{ ship.registration.name }} · {{ ship.registration.role }}
+          </p>
+        }
+      </div>
+      <div class="flex flex-col items-center">
+        <select
+          class="sk-select w-full max-w-xs"
+          [ngModel]="bShip()?.symbol ?? ''"
+          (ngModelChange)="bSymbol.set($event)"
+        >
+          @for (s of ships(); track s.symbol) {
+            <option [value]="s.symbol">{{ s.symbol }}</option>
+          }
+        </select>
+        @if (bShip(); as ship) {
+          <app-ship-viewer-3d class="mt-2 block h-[min(38vh,320px)] w-full" [ship]="ship" />
+          <p class="mt-1 text-center text-xs text-white/70">
+            {{ ship.registration.name }} · {{ ship.registration.role }}
+          </p>
+        }
+      </div>
+    </div>
+
+    @if (recommendation(); as rec) {
+      <div class="sk-panel flex flex-col gap-1 text-sm">
+        <p>
+          Best for extraction:
+          <span class="text-cyan-300">{{ rec.extraction.symbol }}</span> — {{ rec.extraction.reason }}
+        </p>
+        <p>
+          Best for contracts:
+          <span class="text-cyan-300">{{ rec.contract.symbol }}</span> — {{ rec.contract.reason }}
+        </p>
+      </div>
+    }
+
+    <div class="sk-panel flex flex-col gap-3">
+      @for (row of rows(); track row.label) {
+        <div>
+          <div class="mb-1 flex items-center justify-between text-xs">
+            <span [class.text-cyan-300]="row.winner === 'a'" [class.font-bold]="row.winner === 'a'">
+              {{ row.aDisplay }}
+            </span>
+            <span class="text-white/70">{{ row.label }}</span>
+            <span [class.text-cyan-300]="row.winner === 'b'" [class.font-bold]="row.winner === 'b'">
+              {{ row.bDisplay }}
+            </span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="sk-gauge flex-1">
+              <div class="sk-gauge-fill" [style.width.%]="barPercent(row.aValue, row)"></div>
+            </div>
+            <div class="sk-gauge flex-1">
+              <div class="sk-gauge-fill" [style.width.%]="barPercent(row.bValue, row)"></div>
+            </div>
+          </div>
+        </div>
+      }
+    </div>
+  </div>
+}

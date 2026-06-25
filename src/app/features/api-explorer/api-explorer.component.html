@@ -1,0 +1,129 @@
+<p class="sk-title">API</p>
+
+<div class="sk-page-center px-4 py-16">
+  <div class="mx-auto grid h-[70vh] w-full max-w-6xl gap-4 md:grid-cols-[240px_1fr]">
+    <aside class="sk-panel flex flex-col overflow-hidden">
+      <p class="sk-panel-heading text-sm">Categories</p>
+      <input
+        class="sk-input mb-2 w-full text-xs"
+        type="search"
+        placeholder="Search endpoints…"
+        [ngModel]="search()"
+        (ngModelChange)="search.set($event)"
+      />
+      <div class="mb-2 flex flex-wrap gap-1">
+        <button
+          type="button"
+          class="sk-btn text-xs"
+          [class.!bg-white]="selectedTag() === 'all'"
+          [class.!text-black]="selectedTag() === 'all'"
+          (click)="selectTag('all')"
+        >
+          All
+        </button>
+        @for (tag of tags; track tag) {
+          <button
+            type="button"
+            class="sk-btn text-xs"
+            [class.!bg-white]="selectedTag() === tag"
+            [class.!text-black]="selectedTag() === tag"
+            (click)="selectTag(tag)"
+          >
+            {{ tag }}
+          </button>
+        }
+      </div>
+      <ul class="min-h-0 flex-1 overflow-y-auto">
+        @for (endpoint of filteredEndpoints(); track endpointKey(endpoint)) {
+          <li>
+            <button
+              type="button"
+              class="mb-1 w-full rounded px-2 py-1.5 text-left transition duration-150 ease-out-soft hover:bg-white/10"
+              [class.bg-white/15]="selectedEndpoint()?.operationId === endpoint.operationId"
+              (click)="selectEndpoint(endpoint)"
+            >
+              <span class="font-bold {{ methodClass(endpoint.method) }}">{{ endpoint.method }}</span>
+              <span class="ml-1 break-all text-xs text-white/80">{{ endpoint.path }}</span>
+            </button>
+          </li>
+        }
+      </ul>
+      <p class="mt-2 text-xs text-white/50">{{ filteredEndpoints().length }} / {{ allEndpoints.length }} endpoints</p>
+    </aside>
+
+    <main class="sk-panel flex min-h-0 flex-col overflow-hidden">
+      @if (!selectedEndpoint()) {
+        <p class="sk-panel-meta">Select an endpoint from the sidebar to inspect and try it.</p>
+      } @else if (selectedEndpoint(); as endpoint) {
+        <div class="min-h-0 flex-1 overflow-y-auto">
+          <div class="mb-3 flex flex-wrap items-baseline gap-2">
+            <span class="font-bold {{ methodClass(endpoint.method) }}">{{ endpoint.method }}</span>
+            <span class="break-all text-sm text-white">{{ endpoint.path }}</span>
+            <span class="text-xs text-white/50">{{ endpoint.tag }}</span>
+          </div>
+          <p class="text-left text-sm text-white/90">{{ endpoint.summary }}</p>
+          @if (endpoint.description) {
+            <p class="mt-1 max-w-prose text-left text-xs leading-relaxed text-white/60">{{ endpoint.description }}</p>
+          }
+          <p class="mt-2 text-xs text-white/50">
+            Auth: {{ endpoint.requiresAuth ? 'required' : 'optional' }} · {{ endpoint.operationId }}
+          </p>
+
+          @if (endpoint.pathParams.length) {
+            <div class="sk-panel-section">
+              <p class="sk-panel-heading text-xs">Path parameters</p>
+              @for (param of endpoint.pathParams; track param) {
+                <input
+                  class="sk-input mb-1 w-full max-w-md text-sm"
+                  [placeholder]="param"
+                  [value]="pathParamValues()[param] ?? ''"
+                  (input)="updatePathParam(param, $any($event.target).value)"
+                />
+              }
+            </div>
+          }
+
+          @if (endpoint.queryParams.length) {
+            <div class="sk-panel-section">
+              <p class="sk-panel-heading text-xs">Query parameters</p>
+              @for (param of endpoint.queryParams; track param) {
+                <input
+                  class="sk-input mb-1 w-full max-w-md text-sm"
+                  [placeholder]="param"
+                  [value]="queryParamValues()[param] ?? ''"
+                  (input)="updateQueryParam(param, $any($event.target).value)"
+                />
+              }
+            </div>
+          }
+
+          @if (endpoint.method === 'POST' || endpoint.method === 'PATCH' || endpoint.method === 'PUT') {
+            <div class="sk-panel-section">
+              <p class="sk-panel-heading text-xs">Request body (JSON)</p>
+              <textarea
+                class="sk-input w-full min-h-[80px] font-mono text-xs"
+                [ngModel]="bodyText()"
+                (ngModelChange)="bodyText.set($event)"
+              ></textarea>
+            </div>
+          }
+
+          <button
+            type="button"
+            class="sk-btn mt-2"
+            [disabled]="loadingId() === endpointKey(endpoint)"
+            (click)="tryEndpoint(endpoint)"
+          >
+            {{ loadingId() === endpointKey(endpoint) ? 'Sending…' : 'Try request' }}
+          </button>
+
+          @if (responseText()) {
+            <pre class="mt-3 max-h-48 overflow-auto rounded bg-black/80 p-2 text-left text-xs text-green-200">{{
+              responseText()
+            }}</pre>
+          }
+        </div>
+      }
+    </main>
+  </div>
+</div>

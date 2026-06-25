@@ -1,0 +1,50 @@
+@if (agentStore.isAuthenticated()) {
+  <button
+    type="button"
+    class="sk-btn fixed bottom-5 left-5 z-[9000] flex items-center gap-2 px-3 py-2 text-xs"
+    (click)="toggle()"
+    aria-label="Open ship's logbook"
+  >
+    <span class="tracking-widest uppercase">Log</span>
+    @if (logbook.count() > 0) {
+      <span class="rounded-full bg-cyan-500/30 px-1.5 text-[10px] text-cyan-100 ring-1 ring-cyan-400/50">
+        {{ logbook.count() }}
+      </span>
+    }
+  </button>
+
+  @if (open()) {
+    <div class="fixed inset-0 z-[9001] bg-black/40" (click)="close()"></div>
+
+    <aside
+      class="sk-crt fixed top-0 right-0 z-[9002] flex h-screen w-[min(100vw,380px)] flex-col"
+      role="dialog"
+      aria-label="Ship's logbook"
+    >
+      <div class="sk-crt-titlebar">
+        <span class="sk-crt-led"></span>
+        <h2 class="m-0 flex-1 text-sm tracking-[0.25em] uppercase">Ship's Logbook</h2>
+        <button type="button" class="sk-btn px-2 py-1 text-xs" (click)="close()">Close</button>
+      </div>
+
+      <div class="sk-crt-body flex flex-col gap-1.5">
+        @for (entry of entriesReversed(); track entry.id) {
+          <div class="sk-crt-row flex-col items-start gap-0.5">
+            <div class="flex w-full items-center justify-between gap-2">
+              <span class="text-[10px] tracking-[0.2em] text-amber-200/80 uppercase">{{ formatDay(entry) }}</span>
+              <span class="text-[9px] tracking-[0.2em] uppercase" [class]="categoryClass(entry.category)">
+                {{ entry.category }}
+              </span>
+            </div>
+            <p class="m-0 text-xs text-white/90">{{ entry.message }}</p>
+            @if (entry.ship) {
+              <p class="m-0 text-[10px] text-white/45">{{ entry.ship }}</p>
+            }
+          </div>
+        } @empty {
+          <p class="sk-panel-meta">No log entries yet. Extract, trade, or fulfill a contract to begin your record.</p>
+        }
+      </div>
+    </aside>
+  }
+}

@@ -1,0 +1,40 @@
+<p class="sk-title">HOME</p>
+<div class="sk-home">
+  <h1>WELCOME TO</h1>
+  <img src="/assets/logo/spacetradertitle.png" alt="SpaceTraders" class="w-[60%]" />
+  <p>Skamkraft is based on the SpaceTraders API</p>
+
+  @if (status(); as s) {
+    <div class="sk-panel mx-auto mt-6 w-full max-w-lg text-left">
+      <p class="sk-panel-heading">Server status</p>
+      <p class="sk-panel-meta">Status: {{ s.status }} · API {{ s.version }}</p>
+      <p class="sk-panel-meta">Last reset: {{ s.resetDate }}</p>
+      @if (s.serverResets) {
+        <p class="sk-panel-meta">Next reset: {{ s.serverResets.next }} ({{ s.serverResets.frequency }})</p>
+      }
+      @if (s.stats) {
+        <div class="sk-panel-section">
+          <p class="text-xs text-white/75">
+            {{ s.stats.agents }} agents · {{ s.stats.ships }} ships · {{ s.stats.systems }} systems ·
+            {{ s.stats.waypoints }} waypoints
+          </p>
+        </div>
+      }
+      @if (s.announcements?.length) {
+        <div class="sk-panel-section">
+          <p class="mb-2 text-sm text-white/90">Announcements</p>
+          <ul class="max-w-prose space-y-2">
+            @for (a of s.announcements; track a.title) {
+              <li>
+                <p class="text-sm text-white">{{ a.title }}</p>
+                <p class="text-xs leading-relaxed text-white/75">{{ a.body }}</p>
+              </li>
+            }
+          </ul>
+        </div>
+      }
+    </div>
+  } @else if (loading()) {
+    <p class="mt-4 text-sm text-white/75">Loading server status…</p>
+  }
+</div>

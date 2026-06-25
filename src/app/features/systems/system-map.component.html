@@ -1,0 +1,1116 @@
+<p class="sk-title">SYSTEMS</p>
+<div class="sk-map-canvas relative h-screen w-full">
+  @if (viewMode() === 'flight' || viewMode() === 'landing') {
+    <app-system-flight-view
+      class="block h-full w-full"
+      [planets]="planets()"
+      [ships]="ships()"
+      [systemSymbol]="systemSymbol()"
+      [systemName]="systemData()?.name ?? systemSymbol()"
+      [focusPlanetName]="focusPlanetName()"
+      [focusShipSymbol]="focusShipSymbol()"
+      [selectedShipSymbol]="selectedShip()?.symbol ?? null"
+      [selectedShipRole]="selectedShip()?.registration?.role ?? null"
+      [landingPlanet]="landingPlanet()"
+      [landingActive]="viewMode() === 'landing'"
+      [actionPulse]="actionPulse()"
+      (planetClick)="onPlanetClick($event)"
+      (shipClick)="selectShip($event)"
+      (landingComplete)="onLandingComplete()"
+    />
+  }
+  @if ((viewMode() === 'surface' || viewMode() === 'launch') && selectedPlanet(); as planet) {
+    <app-planet-surface-view
+      class="block h-full w-full"
+      [planet]="planet"
+      [launchActive]="viewMode() === 'launch'"
+      [marketPending]="pendingMarketOpen()"
+      [entryActive]="surfaceEntryActive()"
+      [market]="market()"
+      (zoneInteract)="onSurfaceZoneInteract($event)"
+      (marketTrade)="onSurfaceMarketTrade($event)"
+      (exitSurface)="onExitSurface()"
+      (launchComplete)="onLaunchComplete()"
+      (entryComplete)="onSurfaceEntryComplete()"
+    />
+  }
+</div>
+
+<app-travel-modal
+  [open]="travelModalOpen()"
+  [target]="travelModalTarget()"
+  [intent]="travelIntent()"
+  [ships]="travelModalShips()"
+  [selectedShipSymbol]="travelModalShipSymbol()"
+  [flightMode]="flightMode()"
+  [executing]="travelExecuting()"
+  (shipSymbolChange)="onTravelShipChange($event)"
+  (flightModeChange)="flightMode.set($event)"
+  (confirm)="onTravelConfirm()"
+  (cancel)="closeTravelModal()"
+/>
+
+@if (marketOverlayOpen() && market(); as m) {
+  <div class="fixed inset-0 z-[9990] bg-black/50" (click)="closeMarketOverlay()"></div>
+  <aside
+    class="sk-crt fixed top-20 right-5 z-[9991] flex max-h-[calc(100vh-6rem)] w-[min(100vw-2.5rem,380px)] flex-col"
+  >
+    <div class="sk-crt-titlebar">
+      <span class="sk-crt-led" [class.sk-crt-led--busy]="!!loadingAction()"></span>
+      <h2 class="m-0 flex-1 truncate font-display text-sm tracking-widest text-white uppercase">
+        Market — {{ m.symbol }}
+      </h2>
+      <button type="button" class="sk-btn px-2 py-1 text-xs" (click)="closeMarketOverlay()">
+        Close
+      </button>
+    </div>
+
+    <div class="sk-crt-body">
+      @if (m.tradeGoods?.length) {
+        <div class="flex flex-col gap-1">
+          @for (good of m.tradeGoods; track good.symbol) {
+            <app-trade-good-row
+              [good]="good"
+              [selected]="tradeSymbol() === good.symbol"
+              [heldUnits]="cargoUnitsOf(good.symbol)"
+              [maxProceeds]="maxCargoProceeds()"
+              (pick)="tradeSymbol.set($event)"
+            />
+          }
+        </div>
+      } @else {
+        @if (m.exports.length) {
+          <p class="sk-crt-section-label">Exports</p>
+          <div class="mb-2 flex flex-wrap gap-1">
+            @for (g of m.exports; track g.symbol) {
+              <span class="sk-crt-row px-2 py-1 text-[11px]">{{ g.symbol }}</span>
+            }
+          </div>
+        }
+        @if (m.imports.length) {
+          <p class="sk-crt-section-label">Imports</p>
+          <div class="mb-2 flex flex-wrap gap-1">
+            @for (g of m.imports; track g.symbol) {
+              <span class="sk-crt-row px-2 py-1 text-[11px]">{{ g.symbol }}</span>
+            }
+          </div>
+        }
+        @if (m.exchange.length) {
+          <p class="sk-crt-section-label">Exchange</p>
+          <div class="flex flex-wrap gap-1">
+            @for (g of m.exchange; track g.symbol) {
+              <span class="sk-crt-row px-2 py-1 text-[11px]">{{ g.symbol }}</span>
+            }
+          </div>
+        }
+      }
+
+      @if (selectedPlanet(); as planet) {
+        @if (dockedAt(planet.name).length) {
+          <div class="sk-panel-section">
+            <p class="sk-crt-section-label">Trade</p>
+            <label class="sk-crt-section-label" for="trade-ship">Ship</label>
+            <select
+              id="trade-ship"
+              class="sk-select m-0 w-full"
+              [value]="tradeShip()"
+              (change)="tradeShip.set($any($event.target).value)"
+            >
+              <option value="">Select docked ship</option>
+              @for (ship of dockedAt(planet.name); track ship.symbol) {
+                <option [value]="ship.symbol">{{ ship.symbol }}</option>
+              }
+            </select>
+            <div class="mt-1 flex gap-1">
+              <select
+                class="sk-select m-0 flex-1"
+                [value]="tradeSymbol()"
+                (change)="tradeSymbol.set($any($event.target).value)"
+              >
+                @for (good of m.tradeGoods ?? []; track good.symbol) {
+                  <option [value]="good.symbol">{{ good.symbol }}</option>
+                }
+              </select>
+              <input
+                type="number"
+                min="1"
+                class="sk-input m-0 w-16"
+                [value]="tradeUnits()"
+                (input)="tradeUnits.set(+$any($event.target).value || 1)"
+              />
+            </div>
+            <div class="sk-action-grid mt-1">
+              <button
+                type="button"
+                class="sk-btn flex-1"
+                [disabled]="actionLoading('buy-' + tradeShip())"
+                (click)="tradeCargo('buy')"
+              >
+                {{ actionLoading('buy-' + tradeShip()) ? '…' : 'Buy' }}
+              </button>
+              <button
+                type="button"
+                class="sk-btn flex-1"
+                [disabled]="actionLoading('sell-' + tradeShip())"
+                (click)="tradeCargo('sell')"
+              >
+                {{ actionLoading('sell-' + tradeShip()) ? '…' : 'Sell' }}
+              </button>
+            </div>
+          </div>
+        } @else {
+          <p class="sk-panel-meta mt-2 text-amber-300">Dock a ship here to trade.</p>
+        }
+      }
+    </div>
+  </aside>
+}
+
+@if (terminalOpen() && viewMode() === 'flight') {
+  <aside
+    class="sk-crt fixed top-20 right-5 z-20 flex max-h-[calc(100vh-6rem)] w-[min(100vw-2.5rem,400px)] flex-col"
+  >
+    <div class="sk-crt-titlebar">
+      <span class="sk-crt-led" [class.sk-crt-led--busy]="!!loadingAction()"></span>
+      <div class="min-w-0 flex-1">
+        <p class="m-0 truncate font-display text-sm tracking-widest text-white uppercase">
+          {{ terminalTitle() }}
+        </p>
+        <p class="m-0 truncate text-[10px] text-phosphor-dim">{{ terminalSubtitle() }}</p>
+      </div>
+      <button
+        type="button"
+        class="sk-btn px-2 py-1 text-xs"
+        aria-label="Close terminal"
+        (click)="closeTerminal()"
+      >
+        <svg
+          class="h-3 w-3"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="3"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+    </div>
+
+    <nav class="sk-crt-tabs" role="tablist">
+      @for (tab of cockpitTabs; track tab.id) {
+        <button
+          type="button"
+          role="tab"
+          class="sk-crt-tab"
+          [class.sk-crt-tab--active]="cockpitTab() === tab.id"
+          [attr.aria-selected]="cockpitTab() === tab.id"
+          [disabled]="!isTabEnabled(tab.id)"
+          (click)="selectTab(tab.id)"
+        >
+          {{ tab.label }}
+        </button>
+      }
+    </nav>
+
+    <div class="sk-crt-body">
+      @switch (cockpitTab()) {
+        @case ('nav') {
+          @if (terminalShip(); as ship) {
+            <p class="sk-crt-section-label">Flight ops · {{ ship.symbol }}</p>
+            <div class="sk-crt-row mb-2">
+              <span class="sk-ship-badge" [class]="shipStatusClass(ship.nav.status)">{{
+                ship.nav.status
+              }}</span>
+              <span class="text-xs">Fuel {{ ship.fuel.current }}/{{ ship.fuel.capacity }}</span>
+              <span class="sk-ship-badge ml-auto" [class]="shipFlightModeClass(ship.nav.flightMode)">{{
+                ship.nav.flightMode
+              }}</span>
+            </div>
+
+            <label class="sk-crt-section-label" for="nav-mode">Flight mode</label>
+            <div class="flex gap-1">
+              <select
+                id="nav-mode"
+                class="sk-select m-0 flex-1"
+                [value]="flightMode()"
+                (change)="flightMode.set($any($event.target).value)"
+              >
+                @for (mode of flightModes; track mode) {
+                  <option [value]="mode">{{ mode }}</option>
+                }
+              </select>
+              <button
+                type="button"
+                class="sk-btn"
+                [disabled]="actionLoading('flight-' + ship.symbol)"
+                (click)="setFlightMode(ship.symbol)"
+              >
+                Set
+              </button>
+            </div>
+            <p class="sk-panel-meta mt-1">{{ flightModeDescription(flightMode()) }}</p>
+
+            <div class="sk-action-grid mt-3">
+              @if (shipDocked(ship)) {
+                <button
+                  type="button"
+                  class="sk-btn"
+                  [disabled]="actionLoading('orbit-' + ship.symbol)"
+                  (click)="orbitShip(ship.symbol)"
+                >
+                  Orbit
+                </button>
+              } @else if (shipInOrbit(ship)) {
+                <button
+                  type="button"
+                  class="sk-btn"
+                  [disabled]="actionLoading('dock-' + ship.symbol)"
+                  (click)="dockShip(ship.symbol)"
+                >
+                  Dock
+                </button>
+              }
+              <button
+                type="button"
+                class="sk-btn"
+                [disabled]="actionLoading('chart-' + ship.symbol)"
+                (click)="chartShip(ship.symbol)"
+              >
+                Chart
+              </button>
+            </div>
+
+            <div class="sk-panel-section">
+              <label class="sk-crt-section-label" for="nav-refuel">Refuel (units)</label>
+              <div class="flex gap-1">
+                <input
+                  id="nav-refuel"
+                  type="number"
+                  min="1"
+                  class="sk-input m-0 w-20"
+                  [value]="refuelUnits()"
+                  (input)="refuelUnits.set(+$any($event.target).value || 1)"
+                />
+                <button
+                  type="button"
+                  class="sk-btn flex-1"
+                  [disabled]="actionLoading('refuel-' + ship.symbol)"
+                  (click)="refuelShipSymbol.set(ship.symbol); refuelShipAction()"
+                >
+                  Refuel
+                </button>
+              </div>
+            </div>
+          } @else {
+            <p class="sk-panel-meta">No ship here. Select a ship to access flight controls.</p>
+          }
+
+          @if (selectedPlanet(); as planet) {
+            <div class="sk-panel-section">
+              <p class="sk-crt-section-label">Destination · {{ planet.name }}</p>
+              <button type="button" class="sk-btn w-full" (click)="openTravelModal(planet, 'visit')">
+                Plot course
+              </button>
+              @if (shipsThatCanNavigate(planet).length) {
+                <p class="sk-crt-section-label mt-3">Quick move</p>
+                @for (s of shipsThatCanNavigate(planet); track s.symbol) {
+                  <div class="sk-crt-row mb-1">
+                    <span class="flex-1 truncate text-xs">{{ s.symbol }}</span>
+                    <button
+                      type="button"
+                      class="sk-btn px-2 py-1 text-xs"
+                      [disabled]="actionLoading('nav-' + s.symbol)"
+                      (click)="navigateShip(s.symbol)"
+                    >
+                      Nav
+                    </button>
+                    <button
+                      type="button"
+                      class="sk-btn px-2 py-1 text-xs"
+                      [disabled]="actionLoading('warp-' + s.symbol)"
+                      (click)="warpShip(s.symbol)"
+                    >
+                      Warp
+                    </button>
+                  </div>
+                }
+              }
+
+              @if (planet.isUnderConstruction) {
+                <div class="sk-panel-section">
+                  <p class="sk-crt-section-label">Construction site</p>
+                  <button
+                    type="button"
+                    class="sk-btn w-full"
+                    [disabled]="actionLoading('construction')"
+                    (click)="loadConstruction()"
+                  >
+                    {{ actionLoading('construction') ? '…' : 'Load site' }}
+                  </button>
+                  @if (construction(); as site) {
+                    <ul class="mt-2 list-none p-0 text-xs">
+                      @for (m of site.materials; track m.tradeSymbol) {
+                        <li class="flex items-center gap-2 py-0.5">
+                          <span class="flex-1 truncate">{{ m.tradeSymbol }}</span>
+                          <span class="text-phosphor-dim">{{ m.fulfilled }}/{{ m.required }}</span>
+                        </li>
+                      }
+                    </ul>
+                    @if (!site.isComplete) {
+                      <label class="sk-crt-section-label mt-2" for="supply-ship">Supply ship</label>
+                      <select
+                        id="supply-ship"
+                        class="sk-select m-0 w-full"
+                        [value]="supplyShip()"
+                        (change)="supplyShip.set($any($event.target).value)"
+                      >
+                        <option value="">Select docked ship</option>
+                        @for (s of dockedAt(planet.name); track s.symbol) {
+                          <option [value]="s.symbol">{{ s.symbol }}</option>
+                        }
+                      </select>
+                      <div class="mt-1 flex gap-1">
+                        <select
+                          class="sk-select m-0 flex-1"
+                          [value]="supplyMaterial()"
+                          (change)="supplyMaterial.set($any($event.target).value)"
+                        >
+                          @for (m of site.materials; track m.tradeSymbol) {
+                            <option [value]="m.tradeSymbol">{{ m.tradeSymbol }}</option>
+                          }
+                        </select>
+                        <input
+                          type="number"
+                          min="1"
+                          class="sk-input m-0 w-16"
+                          [value]="supplyUnits()"
+                          (input)="supplyUnits.set(+$any($event.target).value || 1)"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        class="sk-btn mt-1 w-full"
+                        [disabled]="actionLoading('supply')"
+                        (click)="supplyConstruction()"
+                      >
+                        Supply materials
+                      </button>
+                    }
+                  }
+                </div>
+              }
+            </div>
+          }
+        }
+        @case ('market') {
+          @if (market(); as m) {
+            <div class="mb-2 flex items-center gap-2">
+              <p class="sk-crt-section-label m-0 flex-1">Market · {{ m.symbol }}</p>
+              <button
+                type="button"
+                class="sk-btn px-2 py-1 text-xs"
+                [disabled]="actionLoading('market')"
+                (click)="loadMarket()"
+              >
+                {{ actionLoading('market') ? '…' : 'Refresh' }}
+              </button>
+            </div>
+
+            @if (m.tradeGoods?.length) {
+              <div class="flex flex-col gap-1">
+                @for (good of m.tradeGoods; track good.symbol) {
+                  <app-trade-good-row
+                    [good]="good"
+                    [selected]="tradeSymbol() === good.symbol"
+                    [heldUnits]="cargoUnitsOf(good.symbol)"
+                    [maxProceeds]="maxCargoProceeds()"
+                    (pick)="tradeSymbol.set($event)"
+                  />
+                }
+              </div>
+            } @else {
+              <p class="sk-panel-meta">Dock a ship here to reveal live prices.</p>
+              @if (m.exports.length) {
+                <p class="sk-crt-section-label mt-2">Exports</p>
+                <div class="flex flex-wrap gap-1">
+                  @for (g of m.exports; track g.symbol) {
+                    <span class="sk-crt-row px-2 py-1 text-[11px]">{{ g.symbol }}</span>
+                  }
+                </div>
+              }
+              @if (m.imports.length) {
+                <p class="sk-crt-section-label mt-2">Imports</p>
+                <div class="flex flex-wrap gap-1">
+                  @for (g of m.imports; track g.symbol) {
+                    <span class="sk-crt-row px-2 py-1 text-[11px]">{{ g.symbol }}</span>
+                  }
+                </div>
+              }
+              @if (m.exchange.length) {
+                <p class="sk-crt-section-label mt-2">Exchange</p>
+                <div class="flex flex-wrap gap-1">
+                  @for (g of m.exchange; track g.symbol) {
+                    <span class="sk-crt-row px-2 py-1 text-[11px]">{{ g.symbol }}</span>
+                  }
+                </div>
+              }
+            }
+
+            @if (selectedPlanet(); as planet) {
+              @if (dockedAt(planet.name).length) {
+                <div class="sk-panel-section">
+                  <p class="sk-crt-section-label">Trade</p>
+                  <label class="sk-crt-section-label" for="m-ship">Ship</label>
+                  <select
+                    id="m-ship"
+                    class="sk-select m-0 w-full"
+                    [value]="tradeShip()"
+                    (change)="tradeShip.set($any($event.target).value)"
+                  >
+                    <option value="">Select docked ship</option>
+                    @for (s of dockedAt(planet.name); track s.symbol) {
+                      <option [value]="s.symbol">{{ s.symbol }}</option>
+                    }
+                  </select>
+                  <div class="mt-1 flex gap-1">
+                    <select
+                      class="sk-select m-0 flex-1"
+                      [value]="tradeSymbol()"
+                      (change)="tradeSymbol.set($any($event.target).value)"
+                    >
+                      @for (good of m.tradeGoods ?? []; track good.symbol) {
+                        <option [value]="good.symbol">{{ good.symbol }}</option>
+                      }
+                    </select>
+                    <input
+                      type="number"
+                      min="1"
+                      class="sk-input m-0 w-16"
+                      [value]="tradeUnits()"
+                      (input)="tradeUnits.set(+$any($event.target).value || 1)"
+                    />
+                  </div>
+                  <div class="sk-action-grid mt-1">
+                    <button
+                      type="button"
+                      class="sk-btn flex-1"
+                      [disabled]="actionLoading('buy-' + tradeShip())"
+                      (click)="tradeCargo('buy')"
+                    >
+                      {{ actionLoading('buy-' + tradeShip()) ? '…' : 'Buy' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="sk-btn flex-1"
+                      [disabled]="actionLoading('sell-' + tradeShip())"
+                      (click)="tradeCargo('sell')"
+                    >
+                      {{ actionLoading('sell-' + tradeShip()) ? '…' : 'Sell' }}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    class="sk-btn mt-1 w-full text-xs"
+                    [disabled]="!tradeShip() || actionLoading('cargo-' + tradeShip())"
+                    (click)="loadShipCargo(tradeShip())"
+                  >
+                    Open cargo for margins
+                  </button>
+                </div>
+              } @else {
+                <p class="sk-panel-meta mt-2 text-amber-300">Dock a ship here to trade.</p>
+              }
+            }
+          } @else {
+            <button
+              type="button"
+              class="sk-btn w-full"
+              [disabled]="actionLoading('market')"
+              (click)="loadMarket()"
+            >
+              {{ actionLoading('market') ? '…' : 'Scan market' }}
+            </button>
+          }
+        }
+        @case ('yard') {
+          @if (shipyard(); as yard) {
+            <div class="mb-2 flex items-center gap-2">
+              <p class="sk-crt-section-label m-0 flex-1">Shipyard · {{ yard.symbol }}</p>
+              <button
+                type="button"
+                class="sk-btn px-2 py-1 text-xs"
+                [disabled]="actionLoading('shipyard')"
+                (click)="loadShipyard()"
+              >
+                {{ actionLoading('shipyard') ? '…' : 'Refresh' }}
+              </button>
+            </div>
+            <p class="sk-panel-meta">Modifications fee: {{ yard.modificationsFee }}c</p>
+
+            @if (yard.ships?.length) {
+              <div class="flex flex-col gap-1">
+                @for (s of yard.ships; track s.type) {
+                  <button
+                    type="button"
+                    class="sk-crt-row w-full text-left"
+                    [class.sk-crt-row--active]="purchaseShipType() === s.type"
+                    (click)="purchaseShipType.set(s.type)"
+                  >
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-1">
+                        <span class="truncate text-xs text-white">{{ s.name }}</span>
+                        <span class="ml-auto text-[11px] text-phosphor">{{ s.purchasePrice }}c</span>
+                      </div>
+                      <p class="m-0 text-[10px] text-phosphor-dim">{{ s.type }}</p>
+                    </div>
+                  </button>
+                }
+              </div>
+            } @else {
+              <p class="sk-crt-section-label mt-2">Available types</p>
+              <div class="flex flex-col gap-1">
+                @for (t of yard.shipTypes; track t.type) {
+                  <button
+                    type="button"
+                    class="sk-crt-row w-full text-left"
+                    [class.sk-crt-row--active]="purchaseShipType() === t.type"
+                    (click)="purchaseShipType.set(t.type)"
+                  >
+                    <span class="text-xs text-white">{{ t.type }}</span>
+                  </button>
+                }
+              </div>
+              <p class="sk-panel-meta mt-1">Dock a ship here to reveal live prices.</p>
+            }
+
+            <div class="sk-panel-section">
+              <button
+                type="button"
+                class="sk-btn w-full"
+                [disabled]="!purchaseShipType() || actionLoading('purchase-direct')"
+                (click)="purchaseShipDirect()"
+              >
+                {{ actionLoading('purchase-direct') ? '…' : 'Purchase ' + (purchaseShipType() || 'ship') }}
+              </button>
+            </div>
+          } @else {
+            <button
+              type="button"
+              class="sk-btn w-full"
+              [disabled]="actionLoading('shipyard')"
+              (click)="loadShipyard()"
+            >
+              {{ actionLoading('shipyard') ? '…' : 'Scan shipyard' }}
+            </button>
+          }
+        }
+        @case ('gate') {
+          @if (jumpGate(); as gate) {
+            <div class="mb-2 flex items-center gap-2">
+              <p class="sk-crt-section-label m-0 flex-1">Jump gate · {{ gate.symbol }}</p>
+              <button
+                type="button"
+                class="sk-btn px-2 py-1 text-xs"
+                [disabled]="actionLoading('jumpgate')"
+                (click)="loadJumpGate()"
+              >
+                {{ actionLoading('jumpgate') ? '…' : 'Refresh' }}
+              </button>
+            </div>
+
+            @if (terminalShip(); as ship) {
+              @if (gate.connections.length) {
+                <p class="sk-crt-section-label">Connections</p>
+                <div class="flex flex-col gap-1">
+                  @for (conn of gate.connections; track conn) {
+                    <div class="sk-crt-row">
+                      <span class="flex-1 truncate text-[11px]">{{ conn }}</span>
+                      <button
+                        type="button"
+                        class="sk-btn px-2 py-1 text-xs"
+                        [disabled]="actionLoading('jump-' + ship.symbol)"
+                        (click)="jumpTarget.set(conn); jumpShip(ship.symbol)"
+                      >
+                        Jump
+                      </button>
+                    </div>
+                  }
+                </div>
+              } @else {
+                <p class="sk-panel-meta">No connections from this gate.</p>
+              }
+            } @else {
+              <p class="sk-panel-meta">Bring a ship to this gate to jump.</p>
+            }
+          } @else {
+            <button
+              type="button"
+              class="sk-btn w-full"
+              [disabled]="actionLoading('jumpgate')"
+              (click)="loadJumpGate()"
+            >
+              {{ actionLoading('jumpgate') ? '…' : 'Scan jump gate' }}
+            </button>
+          }
+        }
+        @case ('scan') {
+          @if (terminalShip(); as ship) {
+            <p class="sk-crt-section-label">Sensors · {{ ship.symbol }}</p>
+            <div class="sk-action-grid">
+              <button
+                type="button"
+                class="sk-btn"
+                [disabled]="actionLoading('scan-sys-' + ship.symbol)"
+                (click)="scanSystems(ship.symbol)"
+              >
+                Systems
+              </button>
+              <button
+                type="button"
+                class="sk-btn"
+                [disabled]="actionLoading('scan-wp-' + ship.symbol)"
+                (click)="scanWaypoints(ship.symbol)"
+              >
+                Waypoints
+              </button>
+              <button
+                type="button"
+                class="sk-btn"
+                [disabled]="actionLoading('scan-ships-' + ship.symbol)"
+                (click)="scanShips(ship.symbol)"
+              >
+                Ships
+              </button>
+              <button
+                type="button"
+                class="sk-btn"
+                [disabled]="actionLoading('scan-surface-' + ship.symbol)"
+                (click)="scanSurface(ship.symbol)"
+              >
+                Surface
+              </button>
+            </div>
+
+            <div class="sk-panel-section">
+              <p class="sk-crt-section-label">Mining</p>
+              <div class="sk-action-grid">
+                <button
+                  type="button"
+                  class="sk-btn"
+                  [disabled]="actionLoading('extract-' + ship.symbol)"
+                  (click)="extractResources(ship.symbol)"
+                >
+                  Extract
+                </button>
+                <button
+                  type="button"
+                  class="sk-btn"
+                  [disabled]="actionLoading('siphon-' + ship.symbol)"
+                  (click)="siphonResources(ship.symbol)"
+                >
+                  Siphon
+                </button>
+                <button
+                  type="button"
+                  class="sk-btn"
+                  [disabled]="actionLoading('survey-' + ship.symbol)"
+                  (click)="surveyWaypoint(ship.symbol)"
+                >
+                  Survey
+                </button>
+              </div>
+            </div>
+
+            @if (shipSurveys().length) {
+              <div class="sk-panel-section">
+                <p class="sk-crt-section-label">Surveys</p>
+                @for (sv of shipSurveys(); track $index) {
+                  <div class="sk-crt-row mb-1">
+                    <span class="flex-1 truncate text-[11px]">{{ formatSurvey(sv) }}</span>
+                    <button
+                      type="button"
+                      class="sk-btn px-2 py-1 text-xs"
+                      [disabled]="actionLoading('extract-survey-' + ship.symbol)"
+                      (click)="extractWithSurvey(ship.symbol, sv)"
+                    >
+                      Mine
+                    </button>
+                  </div>
+                }
+              </div>
+            }
+
+            @if (scanResults(); as results) {
+              @if (results.length) {
+                <div class="sk-panel-section">
+                  <p class="sk-crt-section-label">Scan results</p>
+                  <div class="flex flex-col gap-1">
+                    @for (r of results; track $index) {
+                      <div class="sk-crt-row text-[11px]">
+                        <span class="flex-1 truncate">{{ r.symbol }}</span>
+                        <span class="text-phosphor-dim">{{ r.type }}</span>
+                      </div>
+                    }
+                  </div>
+                </div>
+              }
+            }
+
+            @if (shipScanResults(); as ships) {
+              @if (ships.length) {
+                <div class="sk-panel-section">
+                  <p class="sk-crt-section-label">Ships detected</p>
+                  @for (s of ships; track $index) {
+                    <p class="sk-log-line m-0 text-[11px]">{{ formatShipScan(s) }}</p>
+                  }
+                </div>
+              }
+            }
+
+            @if (surfaceScanResults(); as deposits) {
+              @if (deposits.length) {
+                <div class="sk-panel-section">
+                  <p class="sk-crt-section-label">Deposits</p>
+                  @for (d of deposits; track $index) {
+                    <p class="sk-log-line m-0 text-[11px]">{{ formatSurfaceDeposit(d) }}</p>
+                  }
+                </div>
+              }
+            }
+          } @else {
+            <p class="sk-panel-meta">Select a ship to use sensors.</p>
+          }
+        }
+        @case ('cargo') {
+          @if (terminalShip(); as ship) {
+            <div class="mb-2 flex items-center gap-2">
+              <p class="sk-crt-section-label m-0 flex-1">Cargo · {{ ship.symbol }}</p>
+              <button
+                type="button"
+                class="sk-btn px-2 py-1 text-xs"
+                [disabled]="actionLoading('cargo-' + ship.symbol)"
+                (click)="loadShipCargo(ship.symbol)"
+              >
+                {{ actionLoading('cargo-' + ship.symbol) ? '…' : 'Refresh' }}
+              </button>
+            </div>
+
+            @if (shipCargo(); as cargo) {
+              <div class="mb-1 flex items-center gap-2">
+                <div class="sk-gauge flex-1">
+                  <div
+                    class="sk-gauge-fill"
+                    [style.width.%]="cargo.capacity ? (cargo.units / cargo.capacity) * 100 : 0"
+                  ></div>
+                </div>
+                <span class="shrink-0 text-[11px] text-phosphor">
+                  {{ cargo.units }}/{{ cargo.capacity }}
+                </span>
+              </div>
+
+              @if (cargo.inventory.length) {
+                <div class="flex flex-col gap-1">
+                  @for (item of cargo.inventory; track item.symbol) {
+                    <app-cargo-item-row
+                      [item]="item"
+                      [selected]="jettisonSymbol() === item.symbol"
+                      (pick)="jettisonSymbol.set($event); transferSymbol.set($event)"
+                    />
+                  }
+                </div>
+
+                <div class="sk-panel-section">
+                  <p class="sk-crt-section-label">Jettison</p>
+                  <div class="flex gap-1">
+                    <input
+                      type="number"
+                      min="1"
+                      class="sk-input m-0 w-16"
+                      [value]="jettisonUnits()"
+                      (input)="jettisonUnits.set(+$any($event.target).value || 1)"
+                    />
+                    <button
+                      type="button"
+                      class="sk-btn flex-1"
+                      [disabled]="!jettisonSymbol() || actionLoading('jettison-' + ship.symbol)"
+                      (click)="jettisonShipSymbol.set(ship.symbol); jettisonCargo()"
+                    >
+                      Jettison {{ jettisonSymbol() }}
+                    </button>
+                  </div>
+                </div>
+
+                <div class="sk-panel-section">
+                  <p class="sk-crt-section-label">Transfer</p>
+                  <select
+                    class="sk-select m-0 w-full"
+                    [value]="transferTargetShip()"
+                    (change)="transferTargetShip.set($any($event.target).value)"
+                  >
+                    <option value="">Target ship at waypoint</option>
+                    @for (s of shipsAtWaypoint(ship.nav.waypointSymbol); track s.symbol) {
+                      @if (s.symbol !== ship.symbol) {
+                        <option [value]="s.symbol">{{ s.symbol }}</option>
+                      }
+                    }
+                  </select>
+                  <div class="mt-1 flex gap-1">
+                    <input
+                      type="number"
+                      min="1"
+                      class="sk-input m-0 w-16"
+                      [value]="transferUnits()"
+                      (input)="transferUnits.set(+$any($event.target).value || 1)"
+                    />
+                    <button
+                      type="button"
+                      class="sk-btn flex-1"
+                      [disabled]="
+                        !transferTargetShip() ||
+                        !transferSymbol() ||
+                        actionLoading('transfer-' + ship.symbol)
+                      "
+                      (click)="transferCargoAction()"
+                    >
+                      Transfer {{ transferSymbol() }}
+                    </button>
+                  </div>
+                </div>
+              } @else {
+                <p class="sk-panel-meta">Hold is empty.</p>
+              }
+            } @else {
+              <button
+                type="button"
+                class="sk-btn w-full"
+                [disabled]="actionLoading('cargo-' + ship.symbol)"
+                (click)="loadShipCargo(ship.symbol)"
+              >
+                {{ actionLoading('cargo-' + ship.symbol) ? '…' : 'Open cargo' }}
+              </button>
+            }
+
+            <div class="sk-panel-section">
+              <div class="flex items-center gap-2">
+                <p class="sk-crt-section-label m-0 flex-1">Refit</p>
+                <button
+                  type="button"
+                  class="sk-btn px-2 py-1 text-xs"
+                  [disabled]="actionLoading('mounts-' + ship.symbol)"
+                  (click)="loadShipMounts(ship.symbol)"
+                >
+                  {{ actionLoading('mounts-' + ship.symbol) ? '…' : 'Load' }}
+                </button>
+              </div>
+
+              @if (shipMounts().length) {
+                <p class="sk-crt-section-label mt-2">Mounts</p>
+                @for (mount of shipMounts(); track mount.symbol) {
+                  <div class="sk-crt-row mb-1">
+                    <span class="flex-1 truncate text-[11px]">{{ mount.name }}</span>
+                    <button
+                      type="button"
+                      class="sk-btn px-2 py-1 text-xs"
+                      [disabled]="actionLoading('remove-mount-' + ship.symbol)"
+                      (click)="removeMountAction(ship.symbol, mount.symbol)"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                }
+              }
+              <div class="mt-1 flex gap-1">
+                <input
+                  class="sk-input m-0 flex-1 text-sm"
+                  placeholder="Mount symbol from cargo"
+                  [value]="mountSymbol()"
+                  (input)="mountSymbol.set($any($event.target).value)"
+                />
+                <button
+                  type="button"
+                  class="sk-btn"
+                  [disabled]="actionLoading('install-mount-' + ship.symbol)"
+                  (click)="installMountAction(ship.symbol)"
+                >
+                  Install
+                </button>
+              </div>
+
+              @if (shipModules().length) {
+                <p class="sk-crt-section-label mt-2">Modules</p>
+                @for (mod of shipModules(); track mod.symbol) {
+                  <div class="sk-crt-row mb-1">
+                    <span class="flex-1 truncate text-[11px]">{{ mod.name }}</span>
+                    <button
+                      type="button"
+                      class="sk-btn px-2 py-1 text-xs"
+                      [disabled]="actionLoading('remove-module-' + ship.symbol)"
+                      (click)="removeModuleAction(ship.symbol, mod.symbol)"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                }
+              }
+              <div class="mt-1 flex gap-1">
+                <input
+                  class="sk-input m-0 flex-1 text-sm"
+                  placeholder="Module symbol from cargo"
+                  [value]="moduleSymbol()"
+                  (input)="moduleSymbol.set($any($event.target).value)"
+                />
+                <button
+                  type="button"
+                  class="sk-btn"
+                  [disabled]="actionLoading('install-module-' + ship.symbol)"
+                  (click)="installModuleAction(ship.symbol)"
+                >
+                  Install
+                </button>
+              </div>
+            </div>
+
+            <div class="sk-panel-section">
+              <div class="flex items-center gap-2">
+                <p class="sk-crt-section-label m-0 flex-1">Maintenance</p>
+                <button
+                  type="button"
+                  class="sk-btn px-2 py-1 text-xs"
+                  (click)="loadShipMaintenance(ship.symbol)"
+                >
+                  Quotes
+                </button>
+              </div>
+              <div class="sk-action-grid mt-1">
+                <button
+                  type="button"
+                  class="sk-btn flex-1"
+                  [disabled]="actionLoading('repair-' + ship.symbol)"
+                  (click)="repairShipSymbol.set(ship.symbol); repairShipAction()"
+                >
+                  Repair{{ repairQuote() != null ? ' (' + repairQuote() + 'c)' : '' }}
+                </button>
+                <button
+                  type="button"
+                  class="sk-btn flex-1"
+                  [disabled]="actionLoading('scrap-' + ship.symbol)"
+                  (click)="scrapShipSymbol.set(ship.symbol); scrapShipAction()"
+                >
+                  Scrap{{ scrapQuote() != null ? ' (' + scrapQuote() + 'c)' : '' }}
+                </button>
+              </div>
+            </div>
+          } @else {
+            <p class="sk-panel-meta">Select a ship to inspect cargo.</p>
+          }
+        }
+      }
+    </div>
+
+    @if (logbookTail().length) {
+      <div class="border-t border-white/10 px-3 py-2">
+        <p class="sk-crt-section-label">Ship's log</p>
+        <div class="flex flex-col gap-0.5">
+          @for (entry of logbookTail(); track entry.id) {
+            <p class="m-0 text-[10px] leading-snug text-white/70">
+              <span class="text-amber-200/70">{{ logbookDay(entry) }}</span>
+              <span [class]="logbookCategoryClass(entry)"> · </span>{{ entry.message }}
+            </p>
+          }
+        </div>
+      </div>
+    }
+
+    <div class="sk-crt-log" aria-live="polite">
+      @for (line of logLinesReversed(); track line.id) {
+        <p
+          class="sk-log-line"
+          [class.sk-log-line--error]="line.tone === 'error'"
+          [class.sk-log-line--info]="line.tone === 'info'"
+        >
+          &gt; {{ line.text }}
+        </p>
+      } @empty {
+        <p class="sk-log-line sk-log-line--info">&gt; awaiting command…</p>
+      }
+    </div>
+  </aside>
+}
+
+<aside class="fixed top-20 left-5 z-10 flex max-h-[calc(100vh-6rem)] w-[min(100vw-2.5rem,300px)] flex-col gap-2 overflow-y-auto">
+  @if (systemData(); as system) {
+    <div class="sk-panel">
+      <h2 class="sk-panel-heading">{{ system.name ?? system.symbol }}</h2>
+      <p class="sk-panel-meta m-0">
+        {{ system.symbol }} · {{ planets().length }} waypoints
+      </p>
+      <p class="sk-panel-meta mt-2 mb-0 text-[11px] text-cyan-300/90">
+        Click a planet to travel · G on map for global god view
+      </p>
+    </div>
+  }
+
+  <input
+    type="text"
+    class="sk-input w-full"
+    placeholder="Find market waypoint..."
+    [value]="searchQuery()"
+    (input)="onMarketSearch($event)"
+  />
+
+  @if (searchQuery() && marketSearchResults().length) {
+    <div class="sk-panel">
+      <p class="sk-panel-meta mb-2">Markets</p>
+      @for (planet of marketSearchResults(); track planet.name) {
+        <button type="button" class="sk-btn mb-1 w-full text-left" (click)="openTravelModal(planet, 'market')">
+          {{ planet.name }}
+        </button>
+      }
+    </div>
+  } @else if (searchQuery()) {
+    <p class="sk-panel-meta px-1">No marketplace waypoints match.</p>
+  }
+
+  @if (shipsOnMap(ships(), systemSymbol()).length) {
+    <div class="sk-panel">
+      <h3 class="sk-panel-heading">Your ships</h3>
+      @for (ship of shipsOnMap(ships(), systemSymbol()); track ship.symbol; let i = $index) {
+        <button
+          type="button"
+          class="sk-btn mb-1 w-full text-left"
+          [class.sk-ship-selected]="selectedShip()?.symbol === ship.symbol"
+          [class.opacity-60]="shipInTransit(ship)"
+          (click)="selectShip(ship)"
+        >
+          <span class="sk-ship-badge" [class]="shipStatusClass(ship.nav.status)">{{ ship.nav.status }}</span>
+          {{ ship.symbol }}
+          @if (shipInTransit(ship)) {
+            · ETA {{ shipEta(ship) }}
+          } @else {
+            · {{ ship.nav.waypointSymbol }}
+          }
+          @if (i < 9) {
+            <span class="float-right text-white/40">[{{ i + 1 }}]</span>
+          }
+        </button>
+      }
+    </div>
+  }
+
+  @if (selectedPlanet(); as planet) {
+    <div class="sk-panel">
+      <h3 class="sk-panel-heading">{{ planet.name }}</h3>
+      <p class="sk-panel-meta m-0">{{ planet.type }}</p>
+      @if (planet.traits?.length) {
+        <p class="sk-panel-meta mt-1 mb-0">
+          {{ planet.traits!.map((t) => t.name).join(', ') }}
+        </p>
+      }
+      @if (viewMode() === 'surface' || viewMode() === 'launch') {
+        <button type="button" class="sk-btn mt-2 w-full" (click)="onExitSurface()">Leave planet</button>
+      }
+    </div>
+  }
+</aside>

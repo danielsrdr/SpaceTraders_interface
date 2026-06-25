@@ -1,0 +1,399 @@
+<p class="sk-title">SHIPS</p>
+
+<div class="absolute top-4 right-4 z-20 flex gap-1">
+  <button
+    type="button"
+    class="sk-btn text-sm"
+    [class.sk-ship-selected]="mode() === 'hangar'"
+    (click)="setMode('hangar')"
+  >
+    Hangar
+  </button>
+  <button
+    type="button"
+    class="sk-btn text-sm"
+    [class.sk-ship-selected]="mode() === 'compare'"
+    (click)="setMode('compare')"
+  >
+    Compare
+  </button>
+</div>
+
+@if (mode() === 'compare') {
+  @if (loading()) {
+    <div class="sk-page-center"><p class="text-sm text-white/75">Loading fleet…</p></div>
+  } @else if (ships().length) {
+    <app-fleet-compare [ships]="ships()" />
+  } @else {
+    <div class="sk-page-center"><p class="text-sm text-white/75">No ships in fleet.</p></div>
+  }
+} @else {
+  <div class="sk-page-center">
+    <div class="relative mx-auto flex w-full max-w-3xl flex-col text-center text-lg text-white">
+      @if (loading()) {
+        <p class="text-sm text-white/75">Loading fleet…</p>
+      } @else if (ships().length) {
+        <button type="button" class="absolute top-1/2 left-0 -translate-y-1/2 text-[60px] font-bold" (click)="prev()">
+          &lt;
+        </button>
+        <button type="button" class="absolute top-1/2 right-0 -translate-y-1/2 text-[60px] font-bold" (click)="next()">
+          &gt;
+        </button>
+        @for (ship of ships(); track ship.symbol; let i = $index) {
+          @if (i === slideIndex()) {
+            <div>
+              <h5 class="mx-auto w-fit rounded-[5px] bg-surface-overlay px-2.5 py-2.5 text-2xl">
+                {{ ship.symbol }}
+              </h5>
+              <p class="mt-2 text-sm text-white/70">{{ ship.registration.name }} · {{ ship.registration.role }}</p>
+              <app-ship-viewer-3d
+                class="mx-auto mt-6 block h-[min(50vh,420px)] w-[min(90%,640px)]"
+                [ship]="ship"
+                (partClick)="inspect(ship, $event)"
+              />
+              <div class="mx-auto mt-4 flex w-fit flex-wrap items-center justify-center gap-4 rounded-[5px] bg-black/50 px-4 py-2 text-xs">
+                <span class="sk-ship-badge {{ statusBadgeClass(ship.nav.status) }}">{{ ship.nav.status }}</span>
+                <div class="flex items-center gap-2">
+                  <span class="text-white/70">Cond</span>
+                  <div class="sk-gauge w-24">
+                    <div
+                      class="sk-gauge-fill"
+                      [class.sk-gauge-fill--neg]="conditionPercent(ship.frame.condition) < 40"
+                      [style.width.%]="conditionPercent(ship.frame.condition)"
+                    ></div>
+                  </div>
+                  <span class="text-white/80">{{ conditionPercent(ship.frame.condition) }}%</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-white/70">Fuel</span>
+                  <div class="sk-gauge w-24">
+                    <div
+                      class="sk-gauge-fill"
+                      [class.sk-gauge-fill--neg]="fuelPercent(ship) < 25"
+                      [style.width.%]="fuelPercent(ship)"
+                    ></div>
+                  </div>
+                  <span class="text-white/80">{{ fuelPercent(ship) }}%</span>
+                </div>
+              </div>
+              <div class="sk-action-grid mt-4 justify-center">
+                <button type="button" class="sk-btn text-xl" (click)="inspect(ship, 'reg')">Name</button>
+                <button type="button" class="sk-btn text-xl" (click)="inspect(ship, 'nav')">Nav</button>
+                <button type="button" class="sk-btn text-xl" (click)="inspect(ship, 'cargo')">Cargo</button>
+                <button type="button" class="sk-btn text-xl" (click)="inspect(ship, 'maint')">Maint</button>
+                <button type="button" class="sk-btn text-xl" (click)="inspect(ship, 'upgrades')">Upgrades</button>
+                <button type="button" class="sk-btn text-xl" (click)="inspect(ship, 'refine')">Refine</button>
+                <button type="button" class="sk-btn text-xl" (click)="inspect(ship, 'crew')">Crew</button>
+                <button type="button" class="sk-btn text-xl" (click)="inspect(ship, 'frame')">Frame</button>
+                <button type="button" class="sk-btn text-xl" (click)="inspect(ship, 'react')">Reactor</button>
+                <button type="button" class="sk-btn text-xl" (click)="inspect(ship, 'fuel')">Fuel</button>
+              </div>
+            </div>
+          }
+        }
+      } @else {
+        <p class="text-sm text-white/75">No ships in fleet.</p>
+      }
+    </div>
+  </div>
+}
+
+@if (mode() === 'hangar') {
+  @if (inspectTab(); as tab) {
+    @if (currentShip(); as ship) {
+    <aside class="sk-crt fixed top-1/2 right-3 z-[60] flex max-h-[80vh] w-[min(92vw,340px)] -translate-y-1/2 flex-col">
+      <div class="sk-crt-titlebar">
+        <span class="sk-crt-led"></span>
+        <p class="m-0 flex-1 text-sm tracking-widest uppercase">{{ modalTabLabels[tab] }}</p>
+        <button type="button" class="sk-btn px-2 py-1 text-xs" (click)="closeInspect()">Back</button>
+      </div>
+      <div class="sk-crt-body flex flex-col gap-3 text-left">
+        <p class="text-sm leading-relaxed text-white/90">{{ flavorFor(ship) }}</p>
+        @switch (tab) {
+          @case ('reg') {
+            <div class="flex flex-col gap-1 text-xs">
+              <p><span class="text-white/60">Name:</span> {{ ship.registration.name }}</p>
+              <p><span class="text-white/60">Faction:</span> {{ ship.registration.factionSymbol }}</p>
+              <p><span class="text-white/60">Role:</span> {{ ship.registration.role }}</p>
+            </div>
+          }
+          @case ('nav') {
+            <div class="flex flex-col gap-1 text-xs">
+              <span class="sk-ship-badge {{ statusBadgeClass(ship.nav.status) }} w-fit">{{ ship.nav.status }}</span>
+              <p><span class="text-white/60">System:</span> {{ ship.nav.systemSymbol }}</p>
+              <p><span class="text-white/60">Waypoint:</span> {{ ship.nav.waypointSymbol }}</p>
+              <p><span class="text-white/60">Flight mode:</span> {{ ship.nav.flightMode }}</p>
+            </div>
+          }
+          @case ('crew') {
+            <div class="flex flex-col gap-1 text-xs">
+              <div class="flex justify-between text-white/70">
+                <span>Morale</span><span>{{ ship.crew.morale }}/100</span>
+              </div>
+              <div class="sk-gauge">
+                <div
+                  class="sk-gauge-fill"
+                  [class.sk-gauge-fill--neg]="ship.crew.morale < 40"
+                  [style.width.%]="ship.crew.morale"
+                ></div>
+              </div>
+              <p class="mt-1"><span class="text-white/60">Crew:</span> {{ ship.crew.current }}/{{ ship.crew.capacity }} (need {{ ship.crew.required }})</p>
+            </div>
+          }
+          @case ('frame') {
+            <div class="flex flex-col gap-1 text-xs">
+              <div class="flex justify-between text-white/70">
+                <span>Condition</span><span>{{ conditionPercent(ship.frame.condition) }}%</span>
+              </div>
+              <div class="sk-gauge">
+                <div
+                  class="sk-gauge-fill"
+                  [class.sk-gauge-fill--neg]="conditionPercent(ship.frame.condition) < 40"
+                  [style.width.%]="conditionPercent(ship.frame.condition)"
+                ></div>
+              </div>
+              <p class="mt-1"><span class="text-white/60">Frame:</span> {{ ship.frame.name }}</p>
+              <p><span class="text-white/60">Fuel capacity:</span> {{ ship.frame.fuelCapacity }}</p>
+            </div>
+          }
+          @case ('react') {
+            <div class="flex flex-col gap-1 text-xs">
+              <div class="flex justify-between text-white/70">
+                <span>Condition</span><span>{{ conditionPercent(ship.reactor.condition) }}%</span>
+              </div>
+              <div class="sk-gauge">
+                <div
+                  class="sk-gauge-fill"
+                  [class.sk-gauge-fill--neg]="conditionPercent(ship.reactor.condition) < 40"
+                  [style.width.%]="conditionPercent(ship.reactor.condition)"
+                ></div>
+              </div>
+              <p class="mt-1"><span class="text-white/60">Reactor:</span> {{ ship.reactor.name }}</p>
+              <p><span class="text-white/60">Power output:</span> {{ ship.reactor.powerOutput }}</p>
+            </div>
+          }
+          @case ('fuel') {
+            <div class="flex flex-col gap-1 text-xs">
+              <div class="flex justify-between text-white/70">
+                <span>Fuel</span><span>{{ fuelPercent(ship) }}%</span>
+              </div>
+              <div class="sk-gauge">
+                <div
+                  class="sk-gauge-fill"
+                  [class.sk-gauge-fill--neg]="fuelPercent(ship) < 25"
+                  [style.width.%]="fuelPercent(ship)"
+                ></div>
+              </div>
+              <p class="mt-1"><span class="text-white/60">Tanks:</span> {{ ship.fuel.current }}/{{ ship.fuel.capacity }}</p>
+            </div>
+          }
+          @case ('cargo') {
+            <div class="flex flex-col gap-1 text-xs">
+              <div class="flex justify-between text-white/70">
+                <span>Cargo</span><span>{{ cargoPercent(ship) }}%</span>
+              </div>
+              <div class="sk-gauge">
+                <div class="sk-gauge-fill" [style.width.%]="cargoPercent(ship)"></div>
+              </div>
+              @if (ship.cargo) {
+                <p class="mt-1"><span class="text-white/60">Hold:</span> {{ ship.cargo.units }}/{{ ship.cargo.capacity }}</p>
+              }
+            </div>
+          }
+        }
+      </div>
+      <div class="border-t border-white/10 px-3 py-2">
+        <button type="button" class="sk-btn w-full" (click)="manageInspect(ship)">Manage</button>
+      </div>
+    </aside>
+    }
+  }
+}
+
+@if (modalShip(); as ship) {
+  <div
+    class="fixed inset-0 z-[9998] bg-black/70"
+    role="presentation"
+    (click)="closeModal()"
+  ></div>
+  <dialog
+    class="fixed top-1/2 left-1/2 z-[9999] flex max-h-[85vh] w-[min(92vw,520px)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[10px] border-2 border-accent bg-black/95 text-left text-sm text-white"
+    open
+    (click)="$event.stopPropagation()"
+  >
+    <div class="flex items-start justify-between gap-3 border-b border-white/15 px-5 py-4">
+      <div>
+        <p class="text-lg text-accent">{{ ship.symbol }}</p>
+        <p class="text-xs text-white/70">{{ modalTitle(modalTab()) }}</p>
+      </div>
+      <button type="button" class="sk-btn shrink-0 px-3 py-1" (click)="closeModal()">Close</button>
+    </div>
+
+    <div class="overflow-y-auto px-5 py-4">
+      @if (modalLoading()) {
+        <p class="text-sm text-white/75">Loading…</p>
+      } @else {
+        @switch (modalTab()) {
+          @case ('reg') {
+            <div class="sk-panel">
+              <p><span class="text-white/70">Name:</span> {{ ship.registration.name }}</p>
+              <p><span class="text-white/70">Faction:</span> {{ ship.registration.factionSymbol }}</p>
+              <p><span class="text-white/70">Role:</span> {{ ship.registration.role }}</p>
+            </div>
+          }
+          @case ('nav') {
+            @if (navInfo(); as nav) {
+              <div class="sk-panel">
+                <p><span class="text-white/70">System:</span> {{ nav.systemSymbol }}</p>
+                <p><span class="text-white/70">Waypoint:</span> {{ nav.waypointSymbol }}</p>
+                <p><span class="text-white/70">Status:</span> {{ nav.status }}</p>
+                <p><span class="text-white/70">Flight mode:</span> {{ nav.flightMode }}</p>
+                @if (nav.route) {
+                  <div class="sk-panel-section">
+                    <p class="sk-panel-heading text-xs">Route</p>
+                    <p class="text-xs">From {{ nav.route.origin.symbol }} → {{ nav.route.destination.symbol }}</p>
+                    <p class="text-xs text-white/75">Arrival: {{ nav.route.arrival }}</p>
+                  </div>
+                }
+              </div>
+              <p class="mt-3 text-xs text-white/75">{{ formatCooldown(cooldown()) }}</p>
+            } @else {
+              <p class="text-sm text-white/75">Navigation data unavailable.</p>
+            }
+            <button type="button" class="sk-btn mt-3" [disabled]="actionLoading()" (click)="refreshNav(ship.symbol)">
+              Refresh
+            </button>
+          }
+          @case ('crew') {
+            <div class="sk-panel">
+              <p><span class="text-white/70">Current:</span> {{ ship.crew.current }}</p>
+              <p><span class="text-white/70">Capacity:</span> {{ ship.crew.capacity }}</p>
+              <p><span class="text-white/70">Required:</span> {{ ship.crew.required }}</p>
+              <p><span class="text-white/70">Morale:</span> {{ ship.crew.morale }}/100</p>
+            </div>
+          }
+          @case ('frame') {
+            <div class="sk-panel">
+              <p><span class="text-white/70">Name:</span> {{ ship.frame.name }}</p>
+              <p><span class="text-white/70">Condition:</span> {{ formatCondition(ship.frame.condition) }}</p>
+              <p><span class="text-white/70">Fuel capacity:</span> {{ ship.frame.fuelCapacity }}</p>
+              <p class="mt-2 text-xs text-white/75">{{ ship.frame.description }}</p>
+            </div>
+          }
+          @case ('react') {
+            <div class="sk-panel">
+              <p><span class="text-white/70">Name:</span> {{ ship.reactor.name }}</p>
+              <p><span class="text-white/70">Condition:</span> {{ formatCondition(ship.reactor.condition) }}</p>
+              <p><span class="text-white/70">Power:</span> {{ ship.reactor.powerOutput }}</p>
+              <p class="mt-2 text-xs text-white/75">{{ ship.reactor.description }}</p>
+            </div>
+          }
+          @case ('fuel') {
+            <div class="sk-panel">
+              <p><span class="text-white/70">Fuel:</span> {{ formatFuel(ship.fuel.current, ship.fuel.capacity) }}</p>
+              @if (ship.fuel.consumed?.amount) {
+                <p class="mt-2 text-xs text-white/75">
+                  Last consumed: {{ ship.fuel.consumed.amount }} at {{ ship.fuel.consumed.timestamp }}
+                </p>
+              }
+            </div>
+          }
+          @case ('cargo') {
+            @if (cargo(); as c) {
+              <div class="sk-panel">
+                <p class="mb-2">{{ c.units }}/{{ c.capacity }} units used</p>
+                @if (c.inventory.length) {
+                  @for (item of c.inventory; track item.symbol) {
+                    <p class="text-xs">{{ item.symbol }}: {{ item.units }}</p>
+                  }
+                } @else {
+                  <p class="text-xs text-white/75">Cargo bay is empty.</p>
+                }
+              </div>
+            } @else {
+              <p class="text-sm text-white/75">Cargo data unavailable.</p>
+            }
+            <div class="sk-panel-section">
+              <p class="sk-panel-heading text-xs">Jettison</p>
+              <input class="sk-input w-full text-sm" placeholder="Symbol" [ngModel]="jettisonSymbol()" (ngModelChange)="jettisonSymbol.set($event)" />
+              <input class="sk-input w-full text-sm" type="number" min="1" [ngModel]="jettisonUnits()" (ngModelChange)="jettisonUnits.set(+$event)" />
+              <button type="button" class="sk-btn" [disabled]="actionLoading()" (click)="jettison(ship.symbol)">Jettison</button>
+            </div>
+            @if (otherShips(ship.symbol).length) {
+              <div class="sk-panel-section">
+                <p class="sk-panel-heading text-xs">Transfer to ship</p>
+                <select class="sk-select w-full" [ngModel]="transferTarget()" (ngModelChange)="transferTarget.set($event)">
+                  @for (s of otherShips(ship.symbol); track s.symbol) {
+                    <option [value]="s.symbol">{{ s.symbol }}</option>
+                  }
+                </select>
+                <input class="sk-input w-full text-sm" placeholder="Symbol" [ngModel]="transferSymbol()" (ngModelChange)="transferSymbol.set($event)" />
+                <input class="sk-input w-full text-sm" type="number" min="1" [ngModel]="transferUnits()" (ngModelChange)="transferUnits.set(+$event)" />
+                <button type="button" class="sk-btn" [disabled]="actionLoading()" (click)="transfer(ship.symbol)">Transfer</button>
+              </div>
+            } @else {
+              <p class="sk-panel-section text-xs text-white/75">No other ships available for transfer.</p>
+            }
+          }
+          @case ('maint') {
+            <div class="sk-panel">
+              <p><span class="text-white/70">Repair cost:</span> {{ repairQuote() ?? '—' }} credits</p>
+              <p><span class="text-white/70">Scrap value:</span> {{ scrapValue() ?? '—' }} credits</p>
+            </div>
+            <div class="sk-action-grid mt-3">
+              <button type="button" class="sk-btn" [disabled]="actionLoading()" (click)="repair(ship.symbol)">Repair</button>
+              <button type="button" class="sk-btn" [disabled]="actionLoading()" (click)="scrap(ship.symbol)">Scrap</button>
+            </div>
+            @if (ship.nav.status !== 'DOCKED') {
+              <p class="mt-3 text-xs text-amber-300">Dock at a shipyard for repair or scrap.</p>
+            }
+          }
+          @case ('upgrades') {
+            <p class="sk-panel-heading text-xs">Mounts</p>
+            @if (mounts().length) {
+              @for (m of mounts(); track m.symbol) {
+                <div class="mb-1 flex items-center justify-between text-xs">
+                  <span>{{ m.name ?? m.symbol }}</span>
+                  <button type="button" class="sk-btn text-xs" [disabled]="actionLoading()" (click)="removeMount(ship.symbol, m.symbol)">Remove</button>
+                </div>
+              }
+            } @else {
+              <p class="mb-2 text-xs text-white/75">No mounts installed.</p>
+            }
+            <input class="sk-input w-full text-sm" placeholder="Mount symbol from cargo" [ngModel]="mountSymbol()" (ngModelChange)="mountSymbol.set($event)" />
+            <button type="button" class="sk-btn" [disabled]="actionLoading()" (click)="installMount(ship.symbol)">Install mount</button>
+            <div class="sk-panel-section">
+              <p class="sk-panel-heading text-xs">Modules</p>
+              @if (modules().length) {
+                @for (m of modules(); track m.symbol) {
+                  <div class="mb-1 flex items-center justify-between text-xs">
+                    <span>{{ m.name ?? m.symbol }}</span>
+                    <button type="button" class="sk-btn text-xs" [disabled]="actionLoading()" (click)="removeModule(ship.symbol, m.symbol)">Remove</button>
+                  </div>
+                }
+              } @else {
+                <p class="mb-2 text-xs text-white/75">No modules installed.</p>
+              }
+              <input class="sk-input w-full text-sm" placeholder="Module symbol from cargo" [ngModel]="moduleSymbol()" (ngModelChange)="moduleSymbol.set($event)" />
+              <button type="button" class="sk-btn" [disabled]="actionLoading()" (click)="installModule(ship.symbol)">Install module</button>
+            </div>
+          }
+          @case ('refine') {
+            @if (ship.nav.status !== 'DOCKED') {
+              <p class="text-xs text-amber-300">Ship must be docked at a refinery waypoint.</p>
+            }
+            <select class="sk-select w-full" [ngModel]="refineProduce()" (ngModelChange)="refineProduce.set($event)">
+              @for (g of refineGoods; track g) {
+                <option [value]="g">{{ g }}</option>
+              }
+            </select>
+            <button type="button" class="sk-btn mt-3" [disabled]="actionLoading()" (click)="refine(ship.symbol)">Refine</button>
+          }
+          @default {
+            <p class="text-sm text-white/75">Unknown panel.</p>
+          }
+        }
+      }
+    </div>
+  </dialog>
+}

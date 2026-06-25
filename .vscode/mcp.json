@@ -1,0 +1,16 @@
+{
+  // For more information, visit: https://angular.dev/ai/mcp
+  "servers": {
+    "angular-cli": {
+      "command": "npx",
+      "args": ["-y", "@angular/cli", "mcp"]
+    },
+    "spacetraders-api": {
+      "command": "node",
+      "args": ["mcp/spacetraders-server/dist/index.js"],
+      "env": {
+        "SPACETRADERS_TOKEN": ""
+      }
+    }
+  }
+}

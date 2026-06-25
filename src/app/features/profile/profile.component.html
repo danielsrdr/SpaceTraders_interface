@@ -1,0 +1,32 @@
+<p class="sk-title">PROFILE</p>
+<video autoplay muted loop playsinline class="fixed right-0 bottom-0 z-[-1] min-h-full min-w-full object-cover">
+  <source src="/assets/profile/background.mp4" type="video/mp4" />
+</video>
+<div class="sk-page-center">
+  <div class="sk-panel flex w-1/2 flex-col items-center gap-4 text-white">
+    @if (agent(); as a) {
+      <div class="grid w-4/5 grid-cols-2 rounded-[5px] border border-white">
+        <p class="border-r border-white p-1.5 text-center">Name</p>
+        <p class="p-1.5 text-center">{{ a.name }}</p>
+        <p class="border-r border-white p-1.5 text-center">Faction</p>
+        <p class="p-1.5 text-center">{{ a.faction }}</p>
+        <p class="border-r border-white p-1.5 text-center">Credits</p>
+        <p class="p-1.5 text-center">{{ a.credits }}</p>
+        <p class="border-r border-white p-1.5 text-center">Head Quaters</p>
+        <p class="p-1.5 text-center">{{ a.hq }}</p>
+        <p class="border-r border-white p-1.5 text-center">Number of ships</p>
+        <p class="p-1.5 text-center">{{ a.ships_cpt }}</p>
+      </div>
+    }
+    <div class="flex w-4/5 items-center gap-3">
+      <button
+        type="button"
+        class="h-[50px] w-[50px] border-none bg-transparent p-0"
+        (click)="logout()"
+      >
+        <img src="/assets/menu/logout.png" alt="Logout" class="h-full w-full" />
+      </button>
+      <button type="button" class="sk-btn" (click)="copyToken()">COPY TOKEN</button>
+    </div>
+  </div>
+</div>

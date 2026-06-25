@@ -1,0 +1,313 @@
+<p class="sk-title">CONTRACTS</p>
+
+<div class="relative h-screen w-full overflow-y-auto px-6 pt-28 pb-16">
+  <div class="mx-auto flex max-w-6xl flex-col">
+    <div class="mb-5 flex items-center justify-end gap-2">
+      <button
+        type="button"
+        class="sk-btn inline-flex items-center gap-1.5"
+        [attr.aria-pressed]="muted()"
+        [title]="muted() ? 'Sound off' : 'Sound on'"
+        (click)="toggleMute()"
+      >
+        @if (muted()) {
+          <svg
+            class="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M11 5 6 9H3v6h3l5 4z" />
+            <path d="M22 9l-6 6M16 9l6 6" />
+          </svg>
+          <span>Sound off</span>
+        } @else {
+          <svg
+            class="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M11 5 6 9H3v6h3l5 4z" />
+            <path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8 8 0 0 1 0 12" />
+          </svg>
+          <span>Sound on</span>
+        }
+      </button>
+      <button type="button" class="sk-btn" (click)="openNegotiate()">Negotiate New Contract</button>
+    </div>
+
+    @if (contracts().length === 0) {
+      <div class="sk-panel mx-auto mt-10 max-w-md text-center">
+        <h3 class="sk-panel-heading">No active contracts</h3>
+        <p class="sk-panel-meta">
+          All your contracts are completed. Visit a faction headquarters to negotiate new contracts.
+        </p>
+      </div>
+    } @else {
+      <div class="sk-mission-grid">
+        @for (c of contracts(); track c.id) {
+          <article class="sk-mission-card" [attr.data-status]="statusKey(c)">
+            <header class="flex items-start gap-3">
+              <span class="sk-mission-type" [attr.data-type]="c.type" aria-hidden="true">
+                @switch (c.type) {
+                  @case ('PROCUREMENT') {
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M4 7l8-4 8 4v10l-8 4-8-4z" />
+                      <path d="M4 7l8 4 8-4M12 11v10" />
+                    </svg>
+                  }
+                  @case ('TRANSPORT') {
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <circle cx="5" cy="5" r="2" />
+                      <circle cx="19" cy="19" r="2" />
+                      <path d="M7 7l10 10M17 11v6h-6" />
+                    </svg>
+                  }
+                  @default {
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M12 3c3 2 4 6 4 9l-4 3-4-3c0-3 1-7 4-9z" />
+                      <path d="M8 14l-2 4 3-1M16 14l2 4-3-1" />
+                      <circle cx="12" cy="9" r="1.2" />
+                    </svg>
+                  }
+                }
+              </span>
+              <div class="min-w-0 flex-1">
+                <h3 class="truncate text-base text-white">{{ c.faction }}</h3>
+                <p class="text-xs text-white/60">{{ c.type }}</p>
+              </div>
+              <span class="sk-status-chip" [attr.data-status]="statusKey(c)">{{ statusLabel(c) }}</span>
+            </header>
+
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <p class="sk-mission-meta-label">On accept</p>
+                <p class="text-sm text-white/90">{{ c.paymentAccepted.toLocaleString() }} c</p>
+              </div>
+              <div>
+                <p class="sk-mission-meta-label">On fulfill</p>
+                <p class="text-sm text-phosphor">{{ c.paymentFulfill.toLocaleString() }} c</p>
+              </div>
+            </div>
+
+            <p class="text-[11px]" [class]="c.accepted ? 'text-white/55' : 'text-amber-300/80'">
+              {{ c.accepted ? 'Deadline' : 'Accept by' }}:
+              {{ formatDate(c.accepted ? c.expiration : c.deadline) }}
+            </p>
+
+            @if (c.deliver.length) {
+              <div class="flex flex-col gap-2">
+                @for (d of c.deliver; track d.tradeSymbol) {
+                  <div class="flex flex-col gap-1">
+                    <div class="flex items-center gap-2 text-xs">
+                      <app-good-icon [category]="goodCategory(d.tradeSymbol)" />
+                      <span class="min-w-0 flex-1 truncate text-white/90">
+                        {{ goodLabel(d.tradeSymbol) }}
+                      </span>
+                      <span class="tabular-nums text-white/70">
+                        {{ d.unitsFulfilled ?? 0 }}/{{ d.unitsRequired }}
+                      </span>
+                    </div>
+                    <div class="sk-gauge">
+                      <div class="sk-gauge-fill" [style.width.%]="progressPct(d)"></div>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+
+            @if (c.accepted && !c.fulfilled) {
+              <div class="sk-timeline">
+                <div class="sk-timeline-step">
+                  <span class="sk-timeline-label">Need</span>
+                  <span class="sk-timeline-value">{{ totalRemaining(c) }} units left</span>
+                </div>
+                <div class="sk-timeline-arrow" aria-hidden="true">&rarr;</div>
+                <div class="sk-timeline-step">
+                  <span class="sk-timeline-label">Deliver to</span>
+                  <span class="sk-timeline-value">{{ c.destination }}</span>
+                </div>
+              </div>
+
+              <app-contract-mini-map [destinationSymbol]="c.destination" />
+
+              <button type="button" class="sk-btn w-full" (click)="plotCourse(c.destination)">
+                Plot course to {{ c.destination }}
+              </button>
+            }
+
+            <div class="sk-action-grid mt-auto pt-1">
+              <button type="button" class="sk-btn" (click)="showDetails(c)">Details</button>
+              @if (!c.accepted) {
+                <button
+                  type="button"
+                  class="sk-btn"
+                  [disabled]="acceptingId() === c.id"
+                  (click)="accept(c)"
+                >
+                  {{ acceptingId() === c.id ? 'Processing…' : 'Accept' }}
+                </button>
+              } @else if (!c.fulfilled) {
+                <button type="button" class="sk-btn" (click)="openDeliver(c)">Deliver cargo</button>
+                @if (isDeliveryComplete(c)) {
+                  <button
+                    type="button"
+                    class="sk-btn"
+                    [disabled]="fulfillingId() === c.id"
+                    (click)="fulfill(c)"
+                  >
+                    {{ fulfillingId() === c.id ? 'Fulfilling…' : 'Fulfill contract' }}
+                  </button>
+                }
+              }
+            </div>
+          </article>
+        }
+      </div>
+    }
+  </div>
+</div>
+
+@if (celebrate()) {
+  <div class="sk-contract-stamp">
+    <div class="sk-contract-stamp-inner">
+      <p class="text-2xl tracking-[0.2em]">CONTRACT</p>
+      <p class="text-3xl tracking-[0.3em]">COMPLETE</p>
+    </div>
+  </div>
+}
+
+@if (selected(); as sel) {
+  <dialog
+    class="sk-panel fixed top-1/2 left-1/2 z-[1000] min-w-[360px] -translate-x-1/2 -translate-y-1/2 text-left"
+    open
+  >
+    <button type="button" class="sk-btn mb-2" (click)="selected.set(null)">×</button>
+    @if (detailLoading()) {
+      <p class="sk-panel-meta">Loading…</p>
+    } @else {
+      <p class="sk-panel-heading">{{ sel.faction }} · {{ sel.type }}</p>
+      <p class="sk-panel-meta">ID: {{ sel.id }}</p>
+      <div class="sk-panel-section space-y-1 text-sm text-white/90">
+        <p>Expiration: {{ formatDate(sel.expiration) }}</p>
+        <p>Payment on accept: {{ sel.paymentAccepted.toLocaleString() }} c</p>
+        <p>Payment on fulfill: {{ sel.paymentFulfill.toLocaleString() }} c</p>
+      </div>
+      <div class="sk-panel-section">
+        <p class="mb-2 text-sm text-white/90">Delivery terms</p>
+        @for (d of sel.deliver; track d.tradeSymbol) {
+          <p class="text-xs text-white/75">
+            {{ d.tradeSymbol }} → {{ d.destinationSymbol }}:
+            {{ d.unitsFulfilled ?? 0 }}/{{ d.unitsRequired }} units
+          </p>
+        }
+      </div>
+    }
+  </dialog>
+}
+
+@if (showDeliverModal()) {
+  <div class="fixed inset-0 z-[9999] bg-black/70" (click)="closeDeliver()"></div>
+  <div
+    class="sk-panel fixed top-1/2 left-1/2 z-[10000] min-w-[400px] -translate-x-1/2 -translate-y-1/2 text-left"
+  >
+    <p class="sk-panel-heading">Deliver cargo</p>
+    <label class="block text-xs text-white/75">
+      Ship
+      <select
+        class="sk-select mb-2 block w-full"
+        [ngModel]="deliverShipSymbol()"
+        (ngModelChange)="deliverShipSymbol.set($event)"
+      >
+        @for (ship of dockedShips(); track ship.symbol) {
+          <option [value]="ship.symbol">{{ ship.symbol }} ({{ ship.nav.waypointSymbol }})</option>
+        }
+      </select>
+    </label>
+    <label class="block text-xs text-white/75">
+      Trade symbol
+      <input
+        class="sk-input mb-2 block w-full text-sm"
+        [ngModel]="deliverTradeSymbol()"
+        (ngModelChange)="deliverTradeSymbol.set($event)"
+      />
+    </label>
+    <label class="block text-xs text-white/75">
+      Units
+      <input
+        class="sk-input mb-2 block w-full text-sm"
+        type="number"
+        min="1"
+        [ngModel]="deliverUnits()"
+        (ngModelChange)="deliverUnits.set(+$event)"
+      />
+    </label>
+    <div class="sk-action-grid">
+      <button
+        type="button"
+        class="sk-btn"
+        [disabled]="deliveringId() !== null"
+        (click)="submitDeliver()"
+      >
+        {{ deliveringId() ? 'Delivering…' : 'Deliver' }}
+      </button>
+      <button type="button" class="sk-btn" (click)="closeDeliver()">Cancel</button>
+    </div>
+  </div>
+}
+
+@if (showNegotiateModal()) {
+  <div class="fixed inset-0 z-[9999] bg-black/70" (click)="closeNegotiate()"></div>
+  <div
+    class="sk-panel fixed top-1/2 left-1/2 z-[10000] min-w-[400px] -translate-x-1/2 -translate-y-1/2 text-left"
+  >
+    <p class="sk-panel-heading">Negotiate new contract</p>
+    <p class="mb-4 text-xs text-white/75">Select a docked ship at a faction headquarters.</p>
+    @for (ship of dockedShips(); track ship.symbol) {
+      <button
+        type="button"
+        class="mb-2 block w-full rounded px-3 py-2 text-left transition duration-150 ease-out-soft hover:bg-white/10 disabled:opacity-50"
+        [disabled]="negotiatingShip() === ship.symbol"
+        (click)="negotiate(ship.symbol)"
+      >
+        <div class="text-sm text-white">
+          {{ negotiatingShip() === ship.symbol ? 'Negotiating…' : ship.symbol }}
+        </div>
+        <div class="mt-1 text-xs text-white/60">
+          {{ ship.nav.waypointSymbol }} · {{ ship.nav.status }}
+        </div>
+      </button>
+    }
+    <button type="button" class="sk-btn mt-4 w-full" (click)="closeNegotiate()">Cancel</button>
+  </div>
+}

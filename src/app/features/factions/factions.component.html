@@ -1,0 +1,73 @@
+<p class="sk-title">FACTIONS</p>
+
+<div class="sk-page-center px-4">
+  <div class="mx-auto grid w-full max-w-5xl gap-4 md:grid-cols-[1fr_1.2fr]">
+    <div class="sk-panel max-h-[65vh] overflow-y-auto">
+      <p class="sk-panel-heading">Browse factions</p>
+      <input
+        class="sk-input mb-3 w-full text-sm"
+        type="search"
+        placeholder="Search by name or symbol…"
+        [ngModel]="search()"
+        (ngModelChange)="search.set($event)"
+      />
+      @if (loading()) {
+        <p class="sk-panel-meta">Loading…</p>
+      } @else if (!filtered().length) {
+        <p class="sk-panel-meta">No factions match your search.</p>
+      } @else {
+        <ul class="space-y-1">
+          @for (f of filtered(); track f.symbol) {
+            <li>
+              <button
+                type="button"
+                class="w-full rounded border-l-[3px] px-2 py-2 text-left transition duration-150 ease-out-soft hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                [class.bg-white/15]="selected()?.symbol === f.symbol"
+                [style.borderLeftColor]="factionColor(f.symbol)"
+                (click)="selectFaction(f)"
+              >
+                <span class="block text-sm text-white">{{ f.name }}</span>
+                <span class="block text-xs text-white/60">{{ f.symbol }} · HQ {{ f.headquarters }}</span>
+              </button>
+            </li>
+          }
+        </ul>
+      }
+    </div>
+
+    <div class="sk-panel max-h-[65vh] overflow-y-auto">
+      @if (!selected()) {
+        <p class="sk-panel-meta">Select a faction to view details.</p>
+      } @else if (detailLoading()) {
+        <p class="sk-panel-meta">Loading details…</p>
+      } @else {
+        @if (selected(); as f) {
+          <p
+            class="sk-panel-heading border-l-[3px] pl-2"
+            [style.borderLeftColor]="factionColor(f.symbol)"
+          >
+            {{ f.name }}
+          </p>
+          <p class="sk-panel-meta mb-3" [style.color]="factionColor(f.symbol)">{{ f.symbol }}</p>
+
+          <div class="sk-panel-section">
+            <p class="sk-crt-section-label">HQ System</p>
+            <app-contract-mini-map [destinationSymbol]="f.headquarters" />
+            <p class="mt-2 text-sm text-white/90">Headquarters: {{ f.headquarters }}</p>
+            <p class="text-sm text-white/90">Recruiting: {{ f.isRecruiting ? 'Yes' : 'No' }}</p>
+            <button type="button" class="sk-btn mt-2 w-full" (click)="travelToHq()">
+              Voyager au HQ
+            </button>
+          </div>
+
+          <div class="sk-panel-section">
+            <div class="sk-dossier">
+              <span class="sk-dossier-stamp">Classified // {{ f.symbol }}</span>
+              <p class="sk-dossier-body">{{ f.description }}</p>
+            </div>
+          </div>
+        }
+      }
+    </div>
+  </div>
+</div>

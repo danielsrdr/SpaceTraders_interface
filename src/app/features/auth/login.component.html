@@ -1,0 +1,43 @@
+<div class="sk-page-center">
+  <div class="flex w-[340px] flex-col items-center rounded-[5px] bg-black p-[30px]">
+    <p class="text-[50px]">LOGIN</p>
+    <p class="mb-2 w-full text-center text-sm leading-snug text-white/80">
+      New player? Create your agent on Space Traders, copy your agent token, then paste it below.
+    </p>
+    <div class="mb-3 flex w-full flex-wrap justify-center gap-1">
+      <a
+        class="sk-btn inline-block no-underline"
+        [href]="quickstartUrl"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        Open quickstart
+      </a>
+      <button type="button" class="sk-btn" (click)="openQuickstart()">Open in popup</button>
+    </div>
+    <input
+      type="text"
+      placeholder="Agent token"
+      class="sk-input w-full"
+      [formField]="loginForm.token"
+    />
+    <div class="flex w-full justify-between text-xl">
+      <p>Remember me ?</p>
+      <input type="checkbox" class="sk-input" [formField]="loginForm.remember" />
+    </div>
+    <div>
+      <button type="button" class="sk-btn" (click)="submit()" [disabled]="loading()">Validate</button>
+      <button type="button" class="sk-btn" (click)="cancel()">Cancel</button>
+    </div>
+    <div>
+      <button type="button" class="sk-btn" routerLink="/register">Register in app</button>
+    </div>
+    @if (errors().length) {
+      <div class="text-red-500">
+        @for (err of errors(); track err) {
+          <p>{{ err }}</p>
+        }
+      </div>
+    }
+  </div>
+</div>

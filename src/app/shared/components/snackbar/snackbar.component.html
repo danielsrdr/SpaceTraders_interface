@@ -1,0 +1,16 @@
+@if (snackbar.message(); as msg) {
+  <div
+    class="fixed bottom-6 left-1/2 z-[10001] flex max-w-[90vw] -translate-x-1/2 items-center gap-3 rounded-[5px] border-2 border-white px-5 py-3"
+    [class]="snackbarBg(msg.type)"
+    role="status"
+  >
+    {{ msg.text }}
+    <button
+      type="button"
+      class="border-none bg-transparent p-0 px-1 text-xl"
+      (click)="snackbar.dismiss()"
+    >
+      ×
+    </button>
+  </div>
+}

@@ -1,0 +1,84 @@
+@if (open()) {
+  <div class="fixed inset-0 z-[9998] bg-black/70" (click)="cancel.emit()"></div>
+  <dialog
+    class="fixed top-1/2 left-1/2 z-[9999] w-[min(100vw-2rem,420px)] -translate-x-1/2 -translate-y-1/2 rounded-[10px] border-2 border-accent bg-black/95 p-6 text-white"
+    open
+  >
+    @if (target(); as planet) {
+      <h2 class="mt-0 text-accent">Travel to {{ planet.name }}</h2>
+      <p class="sk-panel-meta mb-3">
+        {{ planet.type }}
+        @if (hasTrait(planet, 'MARKETPLACE')) {
+          · Market
+        }
+        @if (hasTrait(planet, 'SHIPYARD')) {
+          · Shipyard
+        }
+      </p>
+
+      @if (ships().length > 1) {
+        <label class="sk-panel-meta mb-1 block" for="travel-ship">Ship</label>
+        <select
+          id="travel-ship"
+          class="sk-select mb-3 w-full"
+          [value]="selectedShipSymbol() ?? ''"
+          (change)="shipSymbolChange.emit($any($event.target).value)"
+        >
+          <option value="" disabled>Select a ship</option>
+          @for (ship of ships(); track ship.symbol) {
+            <option [value]="ship.symbol">{{ ship.symbol }} · {{ ship.nav.status }}</option>
+          }
+        </select>
+      } @else if (ships().length === 1) {
+        <p class="sk-panel-meta mb-3">Ship: {{ ships()[0].symbol }}</p>
+      } @else {
+        <p class="mb-3 text-sm text-amber-300">No ships in this system.</p>
+      }
+
+      <label class="sk-panel-meta mb-1 block" for="travel-mode">Flight mode</label>
+      <select
+        id="travel-mode"
+        class="sk-select mb-3 w-full"
+        [value]="flightMode()"
+        (change)="flightModeChange.emit($any($event.target).value)"
+      >
+        @for (mode of flightModes; track mode) {
+          <option [value]="mode">{{ mode }}@if (mode === 'CRUISE') { (recommended)}</option>
+        }
+      </select>
+
+      @if (planPreview().length) {
+        <p class="sk-panel-meta mb-1">Plan</p>
+        <ul class="mb-3 list-inside list-disc text-sm text-white/85">
+          @for (line of planPreview(); track line) {
+            <li>{{ line }}</li>
+          }
+        </ul>
+      }
+
+      @if (blockers().length) {
+        <div class="mb-3 rounded border border-red-500/40 bg-red-950/40 p-3">
+          @for (blocker of blockers(); track blocker.message) {
+            <p class="m-0 text-sm" [class.text-red-300]="blocker.severity === 'error'" [class.text-amber-300]="blocker.severity === 'warning'">
+              {{ blocker.message }}
+            </p>
+          }
+        </div>
+      }
+
+      <div class="flex gap-2">
+        <button
+          type="button"
+          class="sk-btn flex-1"
+          [disabled]="executing() || goDisabled()"
+          (click)="confirm.emit()"
+        >
+          {{ executing() ? 'Traveling…' : 'Go' }}
+        </button>
+        <button type="button" class="sk-btn flex-1" [disabled]="executing()" (click)="cancel.emit()">
+          Cancel
+        </button>
+      </div>
+    }
+  </dialog>
+}

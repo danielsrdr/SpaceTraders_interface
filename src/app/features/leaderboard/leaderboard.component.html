@@ -1,0 +1,111 @@
+<p class="sk-title">LEADERBOARD</p>
+<video autoplay muted loop class="fixed right-0 bottom-0 z-[-1] min-h-full min-w-full">
+  <source src="/assets/leaderboard/trophee.mp4" type="video/mp4" />
+</video>
+<div class="sk-page-center">
+  <div class="w-full">
+    @if (podium().length) {
+      <div class="sk-podium mx-auto mb-6 w-3/5">
+        @for (row of podium(); track row.symbol) {
+          <button
+            type="button"
+            class="sk-podium-step"
+            [attr.data-rank]="row.rank"
+            [style.--faction-color]="factionColor(row.faction)"
+            (click)="showAgent(row.symbol)"
+          >
+            <span class="sk-podium-rank">{{ row.rank }}</span>
+            <span class="sk-podium-name">{{ row.name }}</span>
+            <span class="sk-podium-credits">{{ row.credits }} cr</span>
+            <span
+              class="sk-podium-faction"
+              [style.color]="factionColor(row.faction)"
+              [style.borderColor]="factionColor(row.faction)"
+              >{{ row.faction }}</span
+            >
+          </button>
+        }
+      </div>
+    }
+
+    <div class="mx-auto mb-3 flex w-3/5 flex-wrap gap-1.5">
+      <button
+        type="button"
+        class="sk-faction-chip"
+        [class.sk-faction-chip--active]="!selectedFaction()"
+        (click)="selectFaction(null)"
+      >
+        All
+      </button>
+      @for (f of factions(); track f) {
+        <button
+          type="button"
+          class="sk-faction-chip"
+          [class.sk-faction-chip--active]="selectedFaction() === f"
+          [style.--faction-color]="factionColor(f)"
+          (click)="selectFaction(f)"
+        >
+          {{ f }}
+        </button>
+      }
+    </div>
+
+    <div
+      class="mx-auto grid w-3/5 grid-cols-6 rounded-t-[5px] border border-white bg-black/50 p-5 text-xl"
+    >
+      <p>Rank</p>
+      <p>Name</p>
+      <p>Credits</p>
+      <p>Headquarters</p>
+      <p>Faction</p>
+      <p>Ships</p>
+    </div>
+    <div
+      class="mx-auto flex h-[350px] w-3/5 flex-col overflow-y-scroll rounded-b-[5px] border border-white bg-black/50 p-5"
+    >
+      @for (row of visibleRows(); track row.rank) {
+        <button
+          type="button"
+          class="grid w-full grid-cols-6 border-b border-white text-left transition duration-150 ease-out-soft hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          [class.bg-white/5]="isYou(row)"
+          (click)="showAgent(row.symbol)"
+        >
+          <p class="p-1.5 text-lg text-white">{{ row.rank }}.</p>
+          <p class="flex items-center gap-1.5 p-1.5 text-lg text-white">
+            {{ row.name }}
+            @if (isYou(row)) {
+              <span class="sk-you-badge">YOU</span>
+            } @else if (isRival(row)) {
+              <span class="sk-rival-badge">RIVAL</span>
+            }
+          </p>
+          <p class="p-1.5 text-lg text-white">{{ row.credits }}</p>
+          <p class="p-1.5 text-lg text-white">{{ row.hq }}</p>
+          <p class="p-1.5 text-lg" [style.color]="factionColor(row.faction)">{{ row.faction }}</p>
+          <p class="p-1.5 text-lg text-white">{{ row.ships }}</p>
+        </button>
+      }
+    </div>
+  </div>
+</div>
+
+@if (detailLoading() || selectedAgent()) {
+  <dialog
+    class="sk-panel fixed top-1/2 left-1/2 z-[1000] min-w-[320px] -translate-x-1/2 -translate-y-1/2 text-left"
+    open
+  >
+    <button type="button" class="sk-btn mb-2" (click)="closeDetail()">×</button>
+    @if (detailLoading()) {
+      <p class="sk-panel-meta">Loading agent…</p>
+    } @else if (selectedAgent(); as a) {
+      <p class="sk-panel-heading">{{ a.name }}</p>
+      <p class="sk-panel-meta">{{ a.name }}</p>
+      <div class="sk-panel-section space-y-1 text-sm text-white/90">
+        <p>Credits: {{ a.credits }}</p>
+        <p>Headquarters: {{ a.hq }}</p>
+        <p>Faction: {{ a.faction }}</p>
+        <p>Ships: {{ a.ships_cpt }}</p>
+      </div>
+    }
+  </dialog>
+}

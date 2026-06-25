@@ -1,0 +1,15 @@
+<div class="sk-ship-viewer relative h-full w-full">
+  <div #host class="sk-ship-viewer__host h-full w-full"></div>
+  @if (tooltipLabel()) {
+    <div
+      class="sk-ship-viewer__tooltip pointer-events-none absolute z-10 rounded-[5px] border-2 border-white bg-surface-overlay px-2 py-1 text-xs text-white"
+      [style.left.px]="tooltipX()"
+      [style.top.px]="tooltipY()"
+    >
+      {{ tooltipLabel() }}
+    </div>
+  }
+  <p class="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 text-xs text-white/60">
+    Drag to rotate · Scroll to zoom · Click parts for details
+  </p>
+</div>

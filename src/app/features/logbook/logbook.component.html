@@ -1,0 +1,32 @@
+<div class="mx-auto flex h-screen w-full max-w-3xl flex-col gap-3 p-6 pt-24">
+  <header class="flex items-center justify-between gap-3">
+    <div>
+      <h1 class="font-display text-2xl tracking-[0.25em] text-cyan-200 uppercase">Ship's Logbook</h1>
+      <p class="m-0 text-xs text-white/55">{{ logbook.count() }} entries on record</p>
+    </div>
+    @if (logbook.count() > 0) {
+      <button type="button" class="sk-btn px-3 py-1 text-xs" (click)="clear()">Clear log</button>
+    }
+  </header>
+
+  <div class="sk-panel flex-1 overflow-y-auto">
+    @for (entry of entriesReversed(); track entry.id) {
+      <div class="flex flex-col gap-0.5 border-b border-white/10 py-2 last:border-0">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-xs tracking-[0.2em] text-amber-200/80 uppercase">{{ formatDay(entry) }}</span>
+          <span class="text-[10px] tracking-[0.2em] uppercase" [class]="categoryClass(entry.category)">
+            {{ entry.category }}
+          </span>
+        </div>
+        <p class="m-0 text-sm text-white/90">{{ entry.message }}</p>
+        @if (entry.ship) {
+          <p class="m-0 text-xs text-white/45">{{ entry.ship }}</p>
+        }
+      </div>
+    } @empty {
+      <p class="sk-panel-meta">
+        No log entries yet. Extract, siphon, trade, refuel, or fulfill a contract to begin your record.
+      </p>
+    }
+  </div>
+</div>

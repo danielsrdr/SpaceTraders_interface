@@ -1,0 +1,35 @@
+<p class="sk-title">DATA</p>
+
+<div class="sk-page-center px-4">
+  <div class="mx-auto w-full max-w-4xl">
+    <div class="sk-panel max-h-[65vh] overflow-y-auto">
+      <p class="sk-panel-heading">Supply chain reference</p>
+      <p class="mb-3 max-w-prose text-left text-xs text-white/75">
+        Export goods and the import goods they can be refined or processed into.
+      </p>
+      <input
+        class="sk-input sticky top-0 z-10 mb-3 w-full text-sm"
+        type="search"
+        placeholder="Filter by export or import good…"
+        [ngModel]="search()"
+        (ngModelChange)="search.set($event)"
+      />
+      @if (loading()) {
+        <p class="sk-panel-meta">Loading…</p>
+      } @else if (!filtered().length) {
+        <p class="sk-panel-meta">No matches.</p>
+      } @else {
+        <div class="space-y-2">
+          @for (row of filtered(); track row.exportGood) {
+            <article class="border-b border-white/10 py-2 last:border-b-0">
+              <p class="text-sm font-normal text-sky-300">{{ row.exportGood }}</p>
+              <p class="text-left text-xs text-white/75">
+                → {{ row.importGoods.join(', ') }}
+              </p>
+            </article>
+          }
+        </div>
+      }
+    </div>
+  </div>
+</div>
