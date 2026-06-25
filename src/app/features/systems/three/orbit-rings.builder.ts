@@ -9,6 +9,7 @@ import {
 } from 'three';
 import { PlanetView } from '../../../models/system.model';
 import { planetWorldPosition3d, SystemLayout3d } from './system-scene.layout';
+import { SystemOrbitEngine } from './system-orbit.engine';
 import {
   isWaypointVisibleInFilter,
   waypointTraitColor,
@@ -19,6 +20,7 @@ import {
 const BAND_TOLERANCE = 10;
 const RING_COLOR = 0x38bdf8;
 const TICK_COLOR = 0x64748b;
+const TRAIL_COLOR = 0x38bdf8;
 
 function bucketOrbitRadii(radii: number[]): number[] {
   const sorted = [...radii].sort((a, b) => a - b);
@@ -157,6 +159,66 @@ export function updateOrbitTicks(
   for (const planet of planets) {
     if (!isWaypointVisibleInFilter(planet, ctx)) continue;
     group.add(buildRadialTick(planet, layout));
+  }
+}
+
+/**
+ * Real elliptical ephemeris paths — one faint Line per body, traced along the
+ * actual Kepler orbit. Each Line's geometry is in parent-relative coordinates;
+ * its object position is re-centered on the parent each frame so moon orbits
+ * follow their planet.
+ */
+export function buildEphemerisTrails(
+  engine: SystemOrbitEngine,
+  planets: PlanetView[],
+): Group {
+  const group = new Group();
+  group.name = 'ephemeris-trails';
+
+  for (const planet of planets) {
+    const path = engine.getOrbitPath(planet.name);
+    if (path.length < 2) continue;
+
+    const positions: number[] = [];
+    for (const point of path) {
+      positions.push(point.x, point.y, point.z);
+    }
+
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+
+    const line = new Line(
+      geometry,
+      new LineBasicMaterial({
+        color: TRAIL_COLOR,
+        transparent: true,
+        opacity: 0.2,
+        depthWrite: false,
+      }),
+    );
+    line.userData['ellipseFor'] = planet.name;
+    line.userData['parent'] = engine.getParentSymbol(planet.name);
+    group.add(line);
+  }
+
+  return group;
+}
+
+/** Re-center each body's ellipse on its parent's current world position. */
+export function syncEphemerisTrails(
+  group: Group,
+  positions: ReadonlyMap<string, Vector3>,
+): void {
+  for (const child of group.children) {
+    const parent = child.userData['parent'] as string | null | undefined;
+    if (!parent) {
+      child.position.set(0, 0, 0);
+      continue;
+    }
+    const parentPos = positions.get(parent);
+    if (parentPos) {
+      child.position.copy(parentPos);
+    }
   }
 }
 

@@ -6,15 +6,21 @@ import {
   Group,
   Mesh,
   MeshStandardMaterial,
+  NormalBlending,
   OctahedronGeometry,
   RingGeometry,
+  ShaderMaterial,
   SphereGeometry,
+  Texture,
   TorusGeometry,
   Vector3,
+  WebGLRenderTarget,
 } from 'three';
 import { PlanetView } from '../../../models/system.model';
 import { resolveWaypointType } from '../planet-helpers';
-import { createLitPlanetMaterial } from './celestial-planet.shader';
+import { createLitPlanetMaterial, planetTypeCode } from './celestial-planet.shader';
+import { SurfaceBaker } from './celestial-surface.baker';
+import { seedFromName } from './shader-noise.glsl';
 import { getPlanetRadius3d, SystemLayout3d } from './system-scene.layout';
 
 const TYPE_PALETTE: Record<string, { color: number; emissive: number; glow: number }> = {
@@ -40,12 +46,82 @@ export interface CelestialBodyResult {
   group: Group;
   radius: number;
   planet: PlanetView;
+  /** Normalized axis (with axial tilt) the body rotates around. */
+  spinAxis: Vector3;
+  /** Angular spin rate (rad/s) at 1x time scale; 0 for non-spinning bodies. */
+  spinRate: number;
+  /** Baked surface render target for static bodies; caller owns disposal. */
+  surfaceTarget?: WebGLRenderTarget;
 }
 
 function hashTint(name: string): number {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   return (h % 20) / 100 - 0.1;
+}
+
+function hashSpin(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+function seededSpinUnit(hash: number, salt: number): number {
+  const x = Math.sin(hash * 0.000137 + salt * 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/** Seeded axial tilt and spin rate, by body type. */
+function computeSpin(planet: PlanetView): { axis: Vector3; rate: number } {
+  const hash = hashSpin(planet.name);
+  const resolved = resolveWaypointType(planet.type);
+
+  // Axial tilt: lean the spin axis off vertical by up to ~0.4 rad.
+  const tilt = seededSpinUnit(hash, 1) * 0.4;
+  const tiltDir = seededSpinUnit(hash, 2) * Math.PI * 2;
+  const axis = new Vector3(
+    Math.sin(tilt) * Math.cos(tiltDir),
+    Math.cos(tilt),
+    Math.sin(tilt) * Math.sin(tiltDir),
+  ).normalize();
+
+  const direction = seededSpinUnit(hash, 3) < 0.5 ? -1 : 1;
+  const jitter = 0.7 + seededSpinUnit(hash, 4) * 0.6;
+
+  let base: number;
+  switch (resolved) {
+    case 'GAS_GIANT':
+    case 'NEBULA':
+      base = 0.45;
+      break;
+    case 'PLANET':
+      base = 0.25;
+      break;
+    case 'MOON':
+      base = 0.12;
+      break;
+    case 'ASTEROID':
+    case 'ENGINEERED_ASTEROID':
+      base = 0.3;
+      break;
+    case 'ORBITAL_STATION':
+    case 'FUEL_STATION':
+    case 'JUMP_GATE':
+    case 'GRAVITY_WELL':
+    case 'ARTIFICIAL_GRAVITY_WELL':
+    case 'ARTIFICAL_GRAVITY_WELL':
+    case 'ASTEROID_FIELD':
+    case 'DEBRIS_FIELD':
+    case 'ASTEROID_BASE':
+    case 'ARTIFACT':
+      base = 0.05;
+      break;
+    default:
+      base = 0.18;
+      break;
+  }
+
+  return { axis, rate: base * jitter * direction };
 }
 
 function tintedColor(base: number, name: string): Color {
@@ -56,18 +132,59 @@ function tintedColor(base: number, name: string): Color {
 }
 
 function addAtmosphereRim(group: Group, radius: number, glowColor: number, planet: PlanetView): void {
-  const atmosphere = new Mesh(
-    new SphereGeometry(radius * 1.06, 32, 32),
-    new MeshStandardMaterial({
-      color: glowColor,
-      emissive: new Color(glowColor),
-      emissiveIntensity: 0.35,
-      transparent: true,
-      opacity: 0.22,
-      side: BackSide,
-      depthWrite: false,
-    }),
-  );
+  const glow = new Color(glowColor);
+  const material = new ShaderMaterial({
+    uniforms: {
+      sunPosition: { value: new Vector3(0, 0, 0) },
+      uColor: { value: new Vector3(glow.r, glow.g, glow.b) },
+      uTime: { value: 0 },
+    },
+    vertexShader: `
+      varying vec3 vNormal;
+      varying vec3 vWorldPos;
+      void main() {
+        vNormal = normalize(normalMatrix * normal);
+        vec4 world = modelMatrix * vec4(position, 1.0);
+        vWorldPos = world.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 sunPosition;
+      uniform vec3 uColor;
+      uniform float uTime;
+      varying vec3 vNormal;
+      varying vec3 vWorldPos;
+
+      void main() {
+        vec3 N = normalize(vNormal);
+        vec3 toSun = normalize(sunPosition - vWorldPos);
+        vec3 viewDir = normalize(cameraPosition - vWorldPos);
+        float ndl = dot(N, toSun);
+
+        float lit = smoothstep(-0.25, 0.35, ndl);
+        float rim = pow(1.0 - abs(dot(viewDir, N)), 2.5);
+        float shimmer = 0.96 + 0.04 * sin(uTime * 0.7);
+
+        vec3 dayCol = mix(uColor, vec3(0.4, 0.6, 1.0), 0.5);
+        // Softer, less saturated Rayleigh sunset confined to a thin terminator band.
+        vec3 sunsetCol = vec3(1.0, 0.62, 0.42);
+        float term = 1.0 - smoothstep(0.0, 0.22, abs(ndl));
+
+        vec3 col = mix(uColor * 0.3, dayCol, lit);
+        col = mix(col, sunsetCol, term * lit * 0.45);
+
+        float alpha = clamp(rim * lit, 0.0, 1.0) * 0.85 * shimmer;
+        gl_FragColor = vec4(col, alpha);
+      }
+    `,
+    transparent: true,
+    blending: NormalBlending,
+    side: BackSide,
+    depthWrite: false,
+  });
+
+  const atmosphere = new Mesh(new SphereGeometry(radius * 1.06, 32, 32), material);
   atmosphere.userData['planet'] = planet;
   group.add(atmosphere);
 }
@@ -96,19 +213,42 @@ function buildSphereBody(
   planet: PlanetView,
   segments = 32,
   sunPosition = new Vector3(0, 0, 0),
-): Mesh {
+  planetType = 'PLANET',
+  baker?: SurfaceBaker,
+): WebGLRenderTarget | undefined {
+  const tinted = tintedColor(palette.color, planet.name);
+  const seed = seedFromName(planet.name);
+  const typeCode = planetTypeCode(planetType);
+
+  // Static rocky/ocean (0) and moon/asteroid (2) surfaces are baked once so the
+  // live shader only does lighting. Gas giants/nebulae (1) stay procedural.
+  let surfaceTarget: WebGLRenderTarget | undefined;
+  let bakedSurface: Texture | undefined;
+  if (baker && (typeCode === 0 || typeCode === 2)) {
+    surfaceTarget = baker.bake({
+      planetType: typeCode,
+      seed,
+      baseColor: tinted,
+      size: typeCode === 2 ? 256 : 512,
+    });
+    bakedSurface = surfaceTarget.texture;
+  }
+
   const core = new Mesh(
     new SphereGeometry(radius, segments, segments),
     createLitPlanetMaterial({
-      baseColor: tintedColor(palette.color, planet.name).getHex(),
+      baseColor: tinted.getHex(),
       glowColor: palette.glow,
       sunPosition,
+      planetType,
+      seed,
+      bakedSurface,
     }),
   );
   core.userData['planet'] = planet;
   group.add(core);
   addAtmosphereRim(group, radius, palette.glow, planet);
-  return core;
+  return surfaceTarget;
 }
 
 function buildStation(group: Group, radius: number, palette: typeof TYPE_PALETTE['ORBITAL_STATION'], planet: PlanetView): void {
@@ -229,13 +369,19 @@ function buildGravityWell(group: Group, radius: number, palette: typeof TYPE_PAL
   group.add(disk);
 }
 
-export function buildCelestialBody(planet: PlanetView, layout: SystemLayout3d): CelestialBodyResult {
+export function buildCelestialBody(
+  planet: PlanetView,
+  layout: SystemLayout3d,
+  baker?: SurfaceBaker,
+): CelestialBodyResult {
   const resolved = resolveWaypointType(planet.type);
   const palette = TYPE_PALETTE[resolved] ?? TYPE_PALETTE['PLANET']!;
   const radius = getPlanetRadius3d(planet, layout);
 
   const group = new Group();
   group.name = `planet-${planet.name}`;
+
+  let surfaceTarget: WebGLRenderTarget | undefined;
 
   switch (resolved) {
     case 'ORBITAL_STATION':
@@ -260,7 +406,7 @@ export function buildCelestialBody(planet: PlanetView, layout: SystemLayout3d): 
       break;
     case 'GAS_GIANT':
     case 'NEBULA': {
-      buildSphereBody(group, radius, palette, planet, 36);
+      buildSphereBody(group, radius, palette, planet, 36, undefined, resolved, baker);
       const ring = new Mesh(
         new RingGeometry(radius * 1.4, radius * 2.2, 64),
         new MeshStandardMaterial({
@@ -279,10 +425,10 @@ export function buildCelestialBody(planet: PlanetView, layout: SystemLayout3d): 
       break;
     }
     case 'MOON':
-      buildSphereBody(group, radius, palette, planet, 24);
+      surfaceTarget = buildSphereBody(group, radius, palette, planet, 24, undefined, resolved, baker);
       break;
     default: {
-      buildSphereBody(group, radius, palette, planet);
+      surfaceTarget = buildSphereBody(group, radius, palette, planet, 32, undefined, resolved, baker);
       break;
     }
   }
@@ -294,5 +440,6 @@ export function buildCelestialBody(planet: PlanetView, layout: SystemLayout3d): 
     }
   });
 
-  return { group, radius, planet };
+  const spin = computeSpin(planet);
+  return { group, radius, planet, spinAxis: spin.axis, spinRate: spin.rate, surfaceTarget };
 }

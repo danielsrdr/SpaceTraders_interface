@@ -9,10 +9,12 @@ import {
   effect,
   inject,
   input,
+  isDevMode,
   output,
   signal,
 } from '@angular/core';
 import {
+  ACESFilmicToneMapping,
   AmbientLight,
   BufferGeometry,
   Clock,
@@ -30,11 +32,18 @@ import {
   Raycaster,
   RingGeometry,
   Scene,
+  ShaderMaterial,
   SphereGeometry,
+  SRGBColorSpace,
   Vector2,
   Vector3,
   WebGLRenderer,
+  WebGLRenderTarget,
 } from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShipData } from '../../models/ship.model';
 import { PlanetView } from '../../models/system.model';
 import {
@@ -44,6 +53,8 @@ import {
   shipsOnMap,
 } from './planet-helpers';
 import { buildCelestialBody } from './three/celestial-body.builder';
+import { SurfaceBaker } from './three/celestial-surface.baker';
+import { updateLitPlanetSun } from './three/celestial-planet.shader';
 import { buildProceduralShip, disposeShip } from '../ships/ship-procedural.builder';
 import {
   computeLabelLayout,
@@ -58,7 +69,13 @@ import {
   type GodViewFilter,
 } from './three/god-view-markers.builder';
 import { buildNebulaBackground, buildStarfieldEnhanced } from './three/nebula-background.builder';
-import { buildOrbitRings, syncOrbitTickPositions, updateOrbitTicks } from './three/orbit-rings.builder';
+import {
+  buildEphemerisTrails,
+  buildOrbitRings,
+  syncEphemerisTrails,
+  syncOrbitTickPositions,
+  updateOrbitTicks,
+} from './three/orbit-rings.builder';
 import { buildSystemSun } from './three/system-sun.builder';
 import { SystemOrbitEngine } from './three/system-orbit.engine';
 import {
@@ -73,6 +90,9 @@ interface PlanetEntry {
   planet: PlanetView;
   group: Group;
   radius: number;
+  spinAxis: Vector3;
+  spinRate: number;
+  surfaceTarget?: WebGLRenderTarget;
 }
 
 interface DockedShipMarkerData {
@@ -111,6 +131,9 @@ export interface GodViewTooltip {
 type CameraMode = 'flight' | 'god';
 
 const GOD_VIEW_FILTERS: GodViewFilter[] = ['important', 'all', 'markets', 'ships'];
+
+/** Orbital-motion time-warp multipliers (0 = paused). */
+const TIME_SCALE_OPTIONS = [0, 1, 10, 100] as const;
 
 const BLIP_SELECTED_COLOR = 0xfbbf24;
 const BLIP_DOCKED_COLOR = 0x38bdf8;
@@ -151,6 +174,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   readonly hoveredPlanet = signal<PlanetView | null>(null);
   readonly hoverTooltip = signal<GodViewTooltip | null>(null);
   readonly godViewFilters = GOD_VIEW_FILTERS;
+  readonly timeScale = signal(1);
+  readonly timeScaleOptions = TIME_SCALE_OPTIONS;
 
   readonly shipCountsByWaypoint = computed(() => {
     const counts = new Map<string, number>();
@@ -170,11 +195,24 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private scene!: Scene;
   private camera!: PerspectiveCamera;
   private renderer!: WebGLRenderer;
+  private composer: EffectComposer | null = null;
+  private bloomPass: UnrealBloomPass | null = null;
+  /** Gate bloom/post-processing cost; falls back to direct render when off.
+   * Exposed for the UI toggle and driven adaptively by the frame-time budget. */
+  readonly highQuality = signal(true);
+  /** When true the user pinned bloom; adaptive auto-tuning stops touching it. */
+  private bloomManual = false;
+  private surfaceBaker: SurfaceBaker | null = null;
+  /** ShaderMaterials carrying a `uTime` uniform, refreshed each rebuild. */
+  private animatedMaterials: ShaderMaterial[] = [];
   private shipGroup!: Group;
   private thrusterLights: import('three').PointLight[] = [];
   private playerShipRole: string | null = null;
   private planetEntries: PlanetEntry[] = [];
+  /** name -> entry index to avoid O(n) scans in the per-frame hot paths. */
+  private planetByName = new Map<string, PlanetEntry>();
   private orbitRingsGroup: Group | null = null;
+  private ephemerisTrailsGroup: Group | null = null;
   private godMarkersGroup: Group | null = null;
   private sunGroup: Group | null = null;
   private sunLight: PointLight | null = null;
@@ -227,6 +265,27 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private readonly tempVec = new Vector3();
   private followPosition = new Vector3();
 
+  // Pre-allocated scratch vectors reused every frame to avoid GC pressure.
+  private readonly markerOriginPos = new Vector3();
+  private readonly markerDestPos = new Vector3();
+  private readonly camOffsetScratch = new Vector3();
+  private readonly camTargetScratch = new Vector3();
+  private readonly viewOffsetScratch = new Vector3();
+  private readonly shipResolveA = new Vector3();
+  private readonly shipResolveB = new Vector3();
+  private readonly shipResolveResult = new Vector3();
+  private readonly landingOffsetScratch = new Vector3();
+  private readonly xAxis = new Vector3(1, 0, 0);
+  private readonly yAxis = new Vector3(0, 1, 0);
+
+  // Frame-time instrumentation + adaptive quality.
+  private readonly devMode = isDevMode();
+  private frameMsEma = 0;
+  private frameSampleCount = 0;
+  private overBudgetMs = 0;
+  private lowPixelRatio = false;
+  private lastRadarDraw = 0;
+
   toggleCameraMode(): void {
     const next = this.cameraMode() === 'flight' ? 'god' : 'flight';
     this.cameraMode.set(next);
@@ -249,6 +308,10 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.applyGodViewFilter();
   }
 
+  setTimeScale(scale: number): void {
+    this.timeScale.set(scale);
+  }
+
   private godMarkerContext(): GodMarkerContext {
     return {
       filter: this.godViewFilter(),
@@ -262,6 +325,9 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     const isGod = this.cameraMode() === 'god';
     if (this.orbitRingsGroup) {
       this.orbitRingsGroup.visible = isGod;
+    }
+    if (this.ephemerisTrailsGroup) {
+      this.ephemerisTrailsGroup.visible = isGod;
     }
     if (this.godMarkersGroup) {
       this.godMarkersGroup.visible = isGod;
@@ -369,6 +435,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.clearShipBlips();
     this.clearTransitArcs();
     if (this.shipGroup) disposeShip(this.shipGroup);
+    this.surfaceBaker?.dispose();
+    this.composer?.dispose();
     this.renderer?.dispose();
   }
 
@@ -419,8 +487,10 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.camera.position.set(0, 4, 12);
 
     this.renderer = new WebGLRenderer({ antialias: true, alpha: false });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(this.targetPixelRatio());
+    this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.15;
+    this.renderer.outputColorSpace = SRGBColorSpace;
     const canvasEl = this.renderer.domElement;
     canvasEl.style.display = 'block';
     canvasEl.style.width = '100%';
@@ -428,6 +498,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     host.appendChild(canvasEl);
 
     this.scene.add(new AmbientLight(0x1a2040, 0.12));
+
+    this.surfaceBaker = new SurfaceBaker(this.renderer);
 
     this.shipGroup = new Group();
     this.scene.add(this.shipGroup);
@@ -444,9 +516,54 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.transitArcs.name = 'transit-arcs';
     this.scene.add(this.transitArcs);
 
+    this.setupComposer();
+    this.refreshAnimatedMaterials();
+
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(host);
     this.resize();
+  }
+
+  private setupComposer(): void {
+    const composer = new EffectComposer(this.renderer);
+    composer.addPass(new RenderPass(this.scene, this.camera));
+
+    // Bloom runs at half resolution (its blur mip-chain is the expensive part);
+    // the composite back to full res keeps the glow looking smooth.
+    const bloom = new UnrealBloomPass(new Vector2(1, 1), 0.6, 0.4, 0.85);
+    composer.addPass(bloom);
+    // OutputPass performs the single ACES tone map + sRGB conversion from the
+    // renderer settings; intermediate passes stay linear, so it is not doubled.
+    composer.addPass(new OutputPass());
+
+    this.composer = composer;
+    this.bloomPass = bloom;
+  }
+
+  /** Capped device pixel ratio; drops to 1.0 when the frame budget is blown. */
+  private targetPixelRatio(): number {
+    const cap = Math.min(window.devicePixelRatio || 1, 1.5);
+    return this.lowPixelRatio ? Math.min(1, cap) : cap;
+  }
+
+  toggleBloom(): void {
+    this.bloomManual = true;
+    this.highQuality.update((v) => !v);
+  }
+
+  private refreshAnimatedMaterials(): void {
+    const list: ShaderMaterial[] = [];
+    this.scene.traverse((obj) => {
+      const raw = (obj as Mesh).material;
+      if (!raw) return;
+      const mats = Array.isArray(raw) ? raw : [raw];
+      for (const m of mats) {
+        if (m instanceof ShaderMaterial && m.uniforms['uTime']) {
+          list.push(m);
+        }
+      }
+    });
+    this.animatedMaterials = list;
   }
 
   private rebuildPlayerShip(role: string): void {
@@ -544,6 +661,28 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  /**
+   * Point on a transit arc at progress `t`, matching the drawn line exactly:
+   * a quadratic bezier whose control point is the origin/dest midpoint lifted
+   * in Y by `max(6, dist * 0.18)` (see {@link updateTransitArcs}). Both the
+   * marker and the camera-followed ship sample this so they ride the line.
+   */
+  private sampleTransitArc(v0: Vector3, v2: Vector3, t: number, target: Vector3): Vector3 {
+    const lift = Math.max(6, v0.distanceTo(v2) * 0.18);
+    const mx = (v0.x + v2.x) * 0.5;
+    const my = (v0.y + v2.y) * 0.5 + lift;
+    const mz = (v0.z + v2.z) * 0.5;
+    const u = 1 - t;
+    const a = u * u;
+    const b = 2 * u * t;
+    const c = t * t;
+    return target.set(
+      a * v0.x + b * mx + c * v2.x,
+      a * v0.y + b * my + c * v2.y,
+      a * v0.z + b * mz + c * v2.z,
+    );
+  }
+
   private updateTransitArcs(elapsed: number): void {
     const dotPulse = 1 + Math.sin(elapsed * 6) * 0.25;
     for (const group of this.transitArcs.children) {
@@ -590,6 +729,14 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  private applyBodySpin(warpedDelta: number): void {
+    if (warpedDelta <= 0) return;
+    for (const entry of this.planetEntries) {
+      if (entry.spinRate === 0) continue;
+      entry.group.rotateOnAxis(entry.spinAxis, entry.spinRate * warpedDelta);
+    }
+  }
+
   private rebuildPlanets(planets: PlanetView[]): void {
     this.clearPlanets();
     this.layout = computeSystemLayout3d(planets);
@@ -601,6 +748,11 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       disposeObject3D(this.orbitRingsGroup);
       this.orbitRingsGroup = null;
     }
+    if (this.ephemerisTrailsGroup) {
+      this.scene.remove(this.ephemerisTrailsGroup);
+      disposeObject3D(this.ephemerisTrailsGroup);
+      this.ephemerisTrailsGroup = null;
+    }
     if (this.godMarkersGroup) {
       this.scene.remove(this.godMarkersGroup);
       disposeObject3D(this.godMarkersGroup);
@@ -608,17 +760,30 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     }
 
     for (const planet of planets) {
-      const built = buildCelestialBody(planet, this.layout);
+      const built = buildCelestialBody(planet, this.layout, this.surfaceBaker ?? undefined);
       const pos = this.orbitEngine.getWorldPosition(planet.name);
       built.group.position.copy(pos);
       this.scene.add(built.group);
-      this.planetEntries.push({ planet, group: built.group, radius: built.radius });
+      const entry: PlanetEntry = {
+        planet,
+        group: built.group,
+        radius: built.radius,
+        spinAxis: built.spinAxis,
+        spinRate: built.spinRate,
+        surfaceTarget: built.surfaceTarget,
+      };
+      this.planetEntries.push(entry);
+      this.planetByName.set(planet.name, entry);
     }
 
     const ctx = this.godMarkerContext();
     this.orbitRingsGroup = buildOrbitRings(planets, this.layout, this.godViewFilter(), ctx);
     this.orbitRingsGroup.visible = this.cameraMode() === 'god';
     this.scene.add(this.orbitRingsGroup);
+
+    this.ephemerisTrailsGroup = buildEphemerisTrails(this.orbitEngine, planets);
+    this.ephemerisTrailsGroup.visible = this.cameraMode() === 'god';
+    this.scene.add(this.ephemerisTrailsGroup);
 
     this.godMarkersGroup = buildGodViewMarkers(planets, this.layout, ctx);
     this.godMarkersGroup.visible = this.cameraMode() === 'god';
@@ -642,6 +807,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       this.sunLight.distance = extent * 6;
     }
 
+    this.refreshAnimatedMaterials();
     this.drawRadar();
   }
 
@@ -649,8 +815,10 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     for (const entry of this.planetEntries) {
       this.scene.remove(entry.group);
       disposeObject3D(entry.group);
+      entry.surfaceTarget?.dispose();
     }
     this.planetEntries = [];
+    this.planetByName.clear();
   }
 
   private updateShipMarkers(fleet: ShipData[], systemSymbol: string): void {
@@ -675,11 +843,14 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     }
 
     for (const [waypointSymbol, shipsAt] of byWaypoint) {
-      const entry = this.planetEntries.find((p) => p.planet.name === waypointSymbol);
+      const entry = this.planetByName.get(waypointSymbol);
       if (!entry) continue;
 
       shipsAt.forEach((ship, index) => {
         const isSelected = ship.symbol === selected;
+        // The selected ship is already drawn as the camera-followed shipGroup;
+        // skip its marker so it doesn't render twice.
+        if (isSelected) return;
         const marker = this.createShipMarker(ship, shipMarkerScale(entry.radius, isSelected));
         marker.userData['markerData'] = {
           kind: 'docked',
@@ -704,28 +875,35 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     for (const ship of onMap.filter(shipInTransit)) {
       const route = ship.nav.route;
       if (!route) continue;
-      const originPlanet = this.planetEntries.find((p) => p.planet.name === route.origin.symbol);
-      const destPlanet = this.planetEntries.find((p) => p.planet.name === route.destination.symbol);
+      const originPlanet = this.planetByName.get(route.origin.symbol);
+      const destPlanet = this.planetByName.get(route.destination.symbol);
       if (!originPlanet || !destPlanet) continue;
 
       const isSelected = ship.symbol === selected;
-      const marker = this.createShipMarker(ship, shipMarkerScale(originPlanet.radius, isSelected));
-      marker.userData['markerData'] = {
-        kind: 'transit',
-        ship,
-        originSymbol: route.origin.symbol,
-        destSymbol: route.destination.symbol,
-      } satisfies TransitShipMarkerData;
-      marker.userData['ship'] = ship;
-      const blip = this.createShipBlip(
-        Math.max(2.5, originPlanet.radius * 0.5),
-        isSelected ? BLIP_SELECTED_COLOR : BLIP_TRANSIT_COLOR,
-      );
-      marker.userData['blip'] = blip;
-      this.shipBlips.add(blip);
-      this.shipMarkers.add(marker);
+      // The selected ship is drawn as the camera-followed shipGroup, so skip its
+      // duplicate marker — but still draw its arc so it visibly rides the line.
+      if (!isSelected) {
+        const marker = this.createShipMarker(ship, shipMarkerScale(originPlanet.radius, isSelected));
+        marker.userData['markerData'] = {
+          kind: 'transit',
+          ship,
+          originSymbol: route.origin.symbol,
+          destSymbol: route.destination.symbol,
+        } satisfies TransitShipMarkerData;
+        marker.userData['ship'] = ship;
+        const blip = this.createShipBlip(
+          Math.max(2.5, originPlanet.radius * 0.5),
+          BLIP_TRANSIT_COLOR,
+        );
+        marker.userData['blip'] = blip;
+        this.shipBlips.add(blip);
+        this.shipMarkers.add(marker);
+      }
 
       const arc = this.createTransitArc(ship, isSelected ? BLIP_SELECTED_COLOR : BLIP_TRANSIT_COLOR);
+      if (isSelected) {
+        (arc.userData['arc'] as TransitArcData).dot.visible = false;
+      }
       this.transitArcs.add(arc);
     }
 
@@ -755,12 +933,17 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       syncOrbitTickPositions(this.orbitRingsGroup, this.orbitEngine.getAllPositions());
     }
 
+    if (this.ephemerisTrailsGroup) {
+      syncEphemerisTrails(this.ephemerisTrailsGroup, this.orbitEngine.getAllPositions());
+    }
+
     this.applyShipMarkerPositions();
 
     if (this.landingActive() && this.landingTarget) {
-      this.landingTo
-        .copy(this.orbitEngine.getWorldPosition(this.landingTarget.planet.name))
-        .add(new Vector3(0, this.landingTarget.radius * 0.5, this.landingTarget.radius + 2));
+      this.orbitEngine.getWorldPosition(this.landingTarget.planet.name, this.landingTo);
+      this.landingTo.add(
+        this.landingOffsetScratch.set(0, this.landingTarget.radius * 0.5, this.landingTarget.radius + 2),
+      );
     }
 
     if (this.cameraMode() === 'flight' && !this.landingActive()) {
@@ -769,15 +952,15 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   }
 
   private applyShipMarkerPositions(): void {
-    const originPos = new Vector3();
-    const destPos = new Vector3();
+    const originPos = this.markerOriginPos;
+    const destPos = this.markerDestPos;
 
     for (const child of this.shipMarkers.children) {
       const data = child.userData['markerData'] as ShipMarkerData | undefined;
       if (!data) continue;
 
       if (data.kind === 'docked') {
-        const entry = this.planetEntries.find((p) => p.planet.name === data.waypointSymbol);
+        const entry = this.planetByName.get(data.waypointSymbol);
         if (!entry) continue;
         const orbitR = shipOrbitDistance(entry.radius);
         const offset = shipOrbitOffset(data.orbitIndex, data.orbitTotal, orbitR);
@@ -793,15 +976,14 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
       const route = data.ship.nav.route;
       if (!route) continue;
-      const originEntry = this.planetEntries.find((p) => p.planet.name === data.originSymbol);
-      const destEntry = this.planetEntries.find((p) => p.planet.name === data.destSymbol);
+      const originEntry = this.planetByName.get(data.originSymbol);
+      const destEntry = this.planetByName.get(data.destSymbol);
       if (!originEntry || !destEntry) continue;
 
       const t = getTransitProgress(route);
       this.orbitEngine.getWorldPosition(data.originSymbol, originPos);
       this.orbitEngine.getWorldPosition(data.destSymbol, destPos);
-      child.position.lerpVectors(originPos, destPos, t);
-      child.position.y += Math.max(originEntry.radius, destEntry.radius) * 0.4 + 2;
+      this.sampleTransitArc(originPos, destPos, t, child.position);
       this.syncBlipToMarker(child);
     }
   }
@@ -831,25 +1013,25 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private resolveShipWorldPosition(ship: ShipData, _systemSymbol: string): Vector3 {
     if (shipInTransit(ship) && ship.nav.route) {
       const route = ship.nav.route;
-      const originEntry = this.planetEntries.find((p) => p.planet.name === route.origin.symbol);
-      const destEntry = this.planetEntries.find((p) => p.planet.name === route.destination.symbol);
+      const originEntry = this.planetByName.get(route.origin.symbol);
+      const destEntry = this.planetByName.get(route.destination.symbol);
       if (originEntry && destEntry) {
         const t = getTransitProgress(route);
-        const originPos = this.orbitEngine.getWorldPosition(route.origin.symbol, this.tempVec);
-        const destPos = new Vector3();
-        this.orbitEngine.getWorldPosition(route.destination.symbol, destPos);
-        const pos = new Vector3().lerpVectors(originPos, destPos, t);
-        pos.y += 2;
-        return pos;
+        this.orbitEngine.getWorldPosition(route.origin.symbol, this.shipResolveA);
+        this.orbitEngine.getWorldPosition(route.destination.symbol, this.shipResolveB);
+        this.sampleTransitArc(this.shipResolveA, this.shipResolveB, t, this.shipResolveResult);
+        return this.shipResolveResult;
       }
     }
-    const entry = this.planetEntries.find((p) => p.planet.name === ship.nav.waypointSymbol);
+    const entry = this.planetByName.get(ship.nav.waypointSymbol);
     if (!entry) {
-      return this.followPosition.clone();
+      return this.shipResolveResult.copy(this.followPosition);
     }
     const offset = shipOrbitOffset(0, 1, shipOrbitDistance(entry.radius));
-    const waypointPos = this.orbitEngine.getWorldPosition(entry.planet.name, this.tempVec);
-    return waypointPos.clone().add(new Vector3(offset.x, entry.radius * 0.35 + 1.5, offset.y));
+    this.orbitEngine.getWorldPosition(entry.planet.name, this.shipResolveA);
+    return this.shipResolveResult
+      .copy(this.shipResolveA)
+      .add(this.shipResolveB.set(offset.x, entry.radius * 0.35 + 1.5, offset.y));
   }
 
   focusOnShip(ship: ShipData, systemSymbol: string): void {
@@ -861,11 +1043,11 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   /** Standoff offset placing the ship above and in front of a body, scaled so
    * larger bodies are viewed from proportionally farther away. */
   private bodyViewOffset(radius: number): Vector3 {
-    return new Vector3(0, radius * 0.6 + 4, radius * 2.4 + 16);
+    return this.viewOffsetScratch.set(0, radius * 0.6 + 4, radius * 2.4 + 16);
   }
 
   private focusOnPlanet(name: string): void {
-    const entry = this.planetEntries.find((p) => p.planet.name === name);
+    const entry = this.planetByName.get(name);
     if (!entry) return;
     this.orbitEngine.getWorldPosition(name, this.followPosition);
     this.followPosition.add(this.bodyViewOffset(entry.radius));
@@ -873,7 +1055,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   }
 
   private startLanding(planet: PlanetView): void {
-    const entry = this.planetEntries.find((p) => p.planet.name === planet.name);
+    const entry = this.planetByName.get(planet.name);
     if (!entry) {
       this.zone.run(() => this.landingComplete.emit());
       return;
@@ -885,7 +1067,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.shakeSeed = Math.random() * 1000;
     this.landingFrom.copy(this.shipGroup.position);
     this.orbitEngine.getWorldPosition(planet.name, this.landingTo);
-    this.landingTo.add(new Vector3(0, entry.radius * 0.5, entry.radius + 2));
+    this.landingTo.add(this.landingOffsetScratch.set(0, entry.radius * 0.5, entry.radius + 2));
   }
 
   private attachListeners(): void {
@@ -1082,18 +1264,25 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     if (!width || !height) return;
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.renderer.setPixelRatio(this.targetPixelRatio());
     this.renderer.setSize(width, height, false);
+    this.composer?.setSize(width, height);
+    this.bloomPass?.setSize(Math.max(1, Math.floor(width / 2)), Math.max(1, Math.floor(height / 2)));
   }
 
   private startRenderLoop(): void {
     const render = (): void => {
       if (this.disposed) return;
       this.animFrameId = requestAnimationFrame(render);
+      const frameStart = performance.now();
       const delta = Math.min(this.clock.getDelta(), 0.05);
       const elapsed = this.clock.getElapsedTime();
+      const warpedDelta = delta * this.timeScale();
 
-      this.orbitEngine.tick(delta);
+      this.updateAnimatedMaterials(elapsed);
+      this.orbitEngine.tick(warpedDelta);
       this.applyOrbitalPositions();
+      this.applyBodySpin(warpedDelta);
       this.animateShipMarkers(elapsed);
       this.updateTransitArcs(elapsed);
 
@@ -1118,9 +1307,76 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       this.updatePlanetLabels();
       this.updateThrusters(elapsed);
       this.drawRadar();
-      this.renderer.render(this.scene, this.camera);
+      if (this.highQuality() && this.composer) {
+        this.composer.render();
+      } else {
+        this.renderer.render(this.scene, this.camera);
+      }
+      this.sampleFrameTime(performance.now() - frameStart);
     };
     render();
+  }
+
+  /** Tracks an EMA of ms/frame and drives adaptive quality. */
+  private sampleFrameTime(ms: number): void {
+    this.frameMsEma = this.frameMsEma === 0 ? ms : this.frameMsEma * 0.9 + ms * 0.1;
+    this.frameSampleCount++;
+    if (this.devMode && this.frameSampleCount % 120 === 0) {
+      const fps = this.frameMsEma > 0 ? 1000 / this.frameMsEma : 0;
+      console.debug(
+        `[system-flight-view] ~${this.frameMsEma.toFixed(2)} ms/frame (${fps.toFixed(0)} fps), ` +
+          `bloom=${this.highQuality() ? 'on' : 'off'}, pixelRatio=${this.renderer.getPixelRatio().toFixed(2)}`,
+      );
+    }
+    this.updateAdaptiveQuality(ms);
+  }
+
+  /** Drops bloom (then pixel ratio) when the frame budget is sustained-blown,
+   * and recovers once headroom returns. Manual bloom toggle disables auto-bloom. */
+  private updateAdaptiveQuality(ms: number): void {
+    const BUDGET_MS = 22; // ~45fps
+    const RECOVER_MS = BUDGET_MS * 0.6;
+
+    if (this.frameMsEma > BUDGET_MS) {
+      this.overBudgetMs += ms;
+    } else if (this.frameMsEma < RECOVER_MS) {
+      this.overBudgetMs = Math.max(0, this.overBudgetMs - ms * 2);
+    }
+
+    const sustainedOver = this.overBudgetMs > 1000;
+    const sustainedHeadroom = this.frameMsEma < RECOVER_MS && this.overBudgetMs === 0;
+
+    if (!this.bloomManual) {
+      if (sustainedOver && this.highQuality()) {
+        this.highQuality.set(false);
+        this.overBudgetMs = 0;
+        return;
+      }
+      if (sustainedHeadroom && !this.highQuality()) {
+        this.highQuality.set(true);
+        return;
+      }
+    }
+
+    // Last resort once bloom is already off: halve pixel ratio on HiDPI.
+    const wantLow = sustainedOver && !this.highQuality();
+    if (wantLow && !this.lowPixelRatio) {
+      this.lowPixelRatio = true;
+      this.overBudgetMs = 0;
+      this.resize();
+    } else if (sustainedHeadroom && this.lowPixelRatio) {
+      this.lowPixelRatio = false;
+      this.resize();
+    }
+  }
+
+  private updateAnimatedMaterials(elapsed: number): void {
+    for (const m of this.animatedMaterials) {
+      m.uniforms['uTime']!.value = elapsed;
+      if (m.uniforms['sunPosition']) {
+        updateLitPlanetSun(m, this.systemCenter);
+      }
+    }
   }
 
   private updatePlanetLabels(): void {
@@ -1170,11 +1426,12 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     }
 
     const anchor = this.followPosition;
-    const offset = this.cameraOffset.clone();
-    offset.applyAxisAngle(new Vector3(1, 0, 0), -this.cameraPitch);
-    offset.applyAxisAngle(new Vector3(0, 1, 0), -this.cameraYaw);
+    const offset = this.camOffsetScratch.copy(this.cameraOffset);
+    offset.applyAxisAngle(this.xAxis, -this.cameraPitch);
+    offset.applyAxisAngle(this.yAxis, -this.cameraYaw);
 
-    const target = anchor.clone().add(new Vector3(0, 1, 0));
+    const target = this.camTargetScratch.copy(anchor);
+    target.y += 1;
     this.camera.position.copy(target).add(offset);
     this.camera.lookAt(target);
     this.applyCameraShake();
@@ -1221,6 +1478,16 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private drawRadar(): void {
     const canvas = this.radarRef?.nativeElement;
     if (!canvas) return;
+
+    // Throttle to ~12fps; the radar reads fine at a low refresh. Always redraw
+    // while the action-pulse flash is animating so it stays smooth.
+    const now = performance.now();
+    if (now < this.radarFlashUntil || now - this.lastRadarDraw >= 83) {
+      this.lastRadarDraw = now;
+    } else {
+      return;
+    }
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -1269,7 +1536,6 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     ctx.arc(cx, cy, 3, 0, Math.PI * 2);
     ctx.fill();
 
-    const now = performance.now();
     if (now < this.radarFlashUntil) {
       const intensity = (this.radarFlashUntil - now) / 450;
       ctx.save();

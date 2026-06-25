@@ -1,4 +1,4 @@
-import { Material, Mesh, Object3D, Sprite, Texture } from 'three';
+import { Material, Mesh, Object3D, ShaderMaterial, Sprite, Texture } from 'three';
 
 export function disposeObject3D(root: Object3D): void {
   root.traverse((child) => {
@@ -18,6 +18,15 @@ export function disposeMaterial(material: Material | Material[]): void {
   }
   for (const value of Object.values(material)) {
     if (value instanceof Texture) value.dispose();
+  }
+  // ShaderMaterials hold their textures inside `uniforms`, which the property
+  // scan above does not reach (e.g. baked surface textures).
+  if (material instanceof ShaderMaterial) {
+    for (const uniform of Object.values(material.uniforms)) {
+      if (uniform && uniform.value instanceof Texture) {
+        uniform.value.dispose();
+      }
+    }
   }
   material.dispose();
 }

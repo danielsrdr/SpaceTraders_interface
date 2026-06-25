@@ -34,6 +34,28 @@
         <button type="button" class="sk-btn px-3 py-1 text-xs" (click)="toggleCameraMode()">
           {{ cameraMode() === 'god' ? 'Ship view' : 'Global view' }}
         </button>
+        <div class="mt-1 flex gap-1">
+          @for (scale of timeScaleOptions; track scale) {
+            <button
+              type="button"
+              class="sk-btn px-2 py-0.5 text-[10px]"
+              [class.ring-1]="timeScale() === scale"
+              [class.ring-cyan-400]="timeScale() === scale"
+              (click)="setTimeScale(scale)"
+            >
+              {{ scale === 0 ? 'Pause' : scale + 'x' }}
+            </button>
+          }
+        </div>
+        <button
+          type="button"
+          class="sk-btn mt-1 px-2 py-0.5 text-[10px]"
+          [class.ring-1]="highQuality()"
+          [class.ring-cyan-400]="highQuality()"
+          (click)="toggleBloom()"
+        >
+          {{ highQuality() ? 'Bloom: High' : 'Bloom: Off' }}
+        </button>
         @if (cameraMode() === 'god') {
           <button type="button" class="sk-btn px-3 py-1 text-xs" (click)="togglePlanetNames()">
             {{ showPlanetNames() ? 'Hide names' : 'Show names' }}
