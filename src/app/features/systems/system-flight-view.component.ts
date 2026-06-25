@@ -20,10 +20,12 @@ import {
   Clock,
   Color,
   Float32BufferAttribute,
+  Frustum,
   Group,
   HemisphereLight,
   Line,
   LineBasicMaterial,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   Object3D,
@@ -94,6 +96,17 @@ interface PlanetEntry {
   spinAxis: Vector3;
   spinRate: number;
   surfaceTarget?: WebGLRenderTarget;
+  /** Atmosphere/glow shells hidden when the body is far from the camera. */
+  decorShells: Mesh[];
+}
+
+/** A `uTime` ShaderMaterial plus the object that owns it. Materials attached to
+ * a celestial body (`gate=true`) are frozen when off-frustum/far; background and
+ * sun materials (`gate=false`) are always refreshed. */
+interface AnimatedMaterialEntry {
+  mat: ShaderMaterial;
+  host: Object3D | null;
+  gate: boolean;
 }
 
 interface DockedShipMarkerData {
@@ -145,6 +158,10 @@ const ARC_SEGMENTS = 36;
 /** Player ship is rendered at full scale (~4 units); shrink it so it reads as a
  * small vessel next to celestial bodies (MOON r=2.5, PLANET r=5). */
 const PLAYER_SHIP_SCALE = 0.5;
+
+/** Fraction of the scene extent past which a body is rendered at low detail
+ * (no atmosphere/glow shells, frozen animated shader). */
+const LOD_FAR_FACTOR = 0.5;
 
 @Component({
   selector: 'app-system-flight-view',
@@ -205,7 +222,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private bloomManual = false;
   private surfaceBaker: SurfaceBaker | null = null;
   /** ShaderMaterials carrying a `uTime` uniform, refreshed each rebuild. */
-  private animatedMaterials: ShaderMaterial[] = [];
+  private animatedMaterials: AnimatedMaterialEntry[] = [];
   private shipGroup!: Group;
   private thrusterLights: import('three').PointLight[] = [];
   private playerShipRole: string | null = null;
@@ -240,6 +257,14 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private readonly clock = new Clock();
   private animFrameId = 0;
   private resizeObserver: ResizeObserver | null = null;
+  /** Render loop gates: paused when the tab is hidden or the host is off-screen. */
+  private running = false;
+  private onScreen = true;
+  private visObserver: IntersectionObserver | null = null;
+  /** Reused per-frame frustum for gating animated-material updates and body LOD. */
+  private readonly frustum = new Frustum();
+  private readonly frustumMat = new Matrix4();
+  private readonly lodScratch = new Vector3();
   private disposed = false;
   private sceneReady = false;
   private radarFlashUntil = 0;
@@ -565,14 +590,17 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   }
 
   private refreshAnimatedMaterials(): void {
-    const list: ShaderMaterial[] = [];
+    const list: AnimatedMaterialEntry[] = [];
     this.scene.traverse((obj) => {
       const raw = (obj as Mesh).material;
       if (!raw) return;
       const mats = Array.isArray(raw) ? raw : [raw];
+      // Only celestial-body materials are gated; background/sun cover the whole
+      // view (or sit at the center) and must keep animating off-frustum.
+      const gate = obj.userData['planet'] !== undefined;
       for (const m of mats) {
         if (m instanceof ShaderMaterial && m.uniforms['uTime']) {
-          list.push(m);
+          list.push({ mat: m, host: obj, gate });
         }
       }
     });
@@ -762,6 +790,27 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  /** Squared distance beyond which a body is treated as "far": its atmosphere/
+   * glow shells are hidden and its animated shader is frozen. Derived from the
+   * scene extent so it scales with system size. */
+  private lodFarDistanceSq(): number {
+    const d = this.layout.sceneExtent * LOD_FAR_FACTOR;
+    return d * d;
+  }
+
+  /** Hides decorative shells on bodies far from the camera. The body shader is
+   * frozen separately in updateAnimatedMaterials using the same distance test. */
+  private applyPlanetLod(): void {
+    const farSq = this.lodFarDistanceSq();
+    for (const entry of this.planetEntries) {
+      if (!entry.decorShells.length) continue;
+      const far = this.camera.position.distanceToSquared(entry.group.position) > farSq;
+      for (const shell of entry.decorShells) {
+        if (shell.visible === far) shell.visible = !far;
+      }
+    }
+  }
+
   private rebuildPlanets(planets: PlanetView[]): void {
     this.clearPlanets();
     this.layout = computeSystemLayout3d(planets);
@@ -789,6 +838,10 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       const pos = this.orbitEngine.getWorldPosition(planet.name);
       built.group.position.copy(pos);
       this.scene.add(built.group);
+      const decorShells: Mesh[] = [];
+      built.group.traverse((child) => {
+        if (child instanceof Mesh && child.userData['decor']) decorShells.push(child);
+      });
       const entry: PlanetEntry = {
         planet,
         group: built.group,
@@ -796,6 +849,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
         spinAxis: built.spinAxis,
         spinRate: built.spinRate,
         surfaceTarget: built.surfaceTarget,
+        decorShells,
       };
       this.planetEntries.push(entry);
       this.planetByName.set(planet.name, entry);
@@ -1152,6 +1206,17 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     canvas.addEventListener('pointerleave', this.onPointerLeave);
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
+
+    document.addEventListener('visibilitychange', this.onVisibility);
+    this.visObserver = new IntersectionObserver(
+      (entries) => {
+        this.onScreen = entries.some((e) => e.isIntersecting);
+        if (this.shouldRender()) this.resumeRenderLoop();
+        else this.stopRenderLoop();
+      },
+      { threshold: 0 },
+    );
+    this.visObserver.observe(this.hostRef.nativeElement);
   }
 
   private detachListeners(): void {
@@ -1164,7 +1229,16 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     }
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
+
+    document.removeEventListener('visibilitychange', this.onVisibility);
+    this.visObserver?.disconnect();
+    this.visObserver = null;
   }
+
+  private readonly onVisibility = (): void => {
+    if (this.shouldRender()) this.resumeRenderLoop();
+    else this.stopRenderLoop();
+  };
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     if (event.code === 'KeyP') {
@@ -1344,19 +1418,41 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.bloomPass?.setSize(Math.max(1, Math.floor(width / 2)), Math.max(1, Math.floor(height / 2)));
   }
 
+  /** True only when nothing should pause the loop: not disposed, tab visible,
+   * and the host element is on-screen. */
+  private shouldRender(): boolean {
+    return !this.disposed && !document.hidden && this.onScreen;
+  }
+
+  /** Halts requestAnimationFrame scheduling without tearing down the scene. */
+  private stopRenderLoop(): void {
+    this.running = false;
+    cancelAnimationFrame(this.animFrameId);
+  }
+
+  /** Restarts the loop after a pause; purges the accumulated clock delta so the
+   * first resumed frame does not jump the simulation forward. */
+  private resumeRenderLoop(): void {
+    if (this.running || !this.shouldRender()) return;
+    this.clock.getDelta();
+    this.startRenderLoop();
+  }
+
   private startRenderLoop(): void {
+    this.running = true;
     const render = (): void => {
-      if (this.disposed) return;
+      if (this.disposed || !this.running) return;
       this.animFrameId = requestAnimationFrame(render);
       const frameStart = performance.now();
       const delta = Math.min(this.clock.getDelta(), 0.05);
       const elapsed = this.clock.getElapsedTime();
       const warpedDelta = delta * this.timeScale();
 
-      this.updateAnimatedMaterials(elapsed);
       this.orbitEngine.tick(warpedDelta);
       this.applyOrbitalPositions();
       this.applyBodySpin(warpedDelta);
+      this.applyPlanetLod();
+      this.updateAnimatedMaterials(elapsed);
       this.animateShipMarkers(elapsed);
       this.updateTransitArcs(elapsed);
 
@@ -1445,7 +1541,22 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   }
 
   private updateAnimatedMaterials(elapsed: number): void {
-    for (const m of this.animatedMaterials) {
+    this.frustumMat.multiplyMatrices(
+      this.camera.projectionMatrix,
+      this.camera.matrixWorldInverse,
+    );
+    this.frustum.setFromProjectionMatrix(this.frustumMat);
+    const farSq = this.lodFarDistanceSq();
+
+    for (const entry of this.animatedMaterials) {
+      // Freeze gated (per-body) materials the camera cannot see or that are far
+      // away; ungated background/sun materials always advance.
+      if (entry.gate && entry.host) {
+        entry.host.getWorldPosition(this.lodScratch);
+        if (!this.frustum.containsPoint(this.lodScratch)) continue;
+        if (this.camera.position.distanceToSquared(this.lodScratch) > farSq) continue;
+      }
+      const m = entry.mat;
       m.uniforms['uTime']!.value = elapsed;
       if (m.uniforms['sunPosition']) {
         updateLitPlanetSun(m, this.systemCenter);

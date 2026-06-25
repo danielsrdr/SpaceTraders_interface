@@ -10,7 +10,6 @@ import { ContractsComponent } from './features/contracts/contracts.component';
 import { ApiExplorerComponent } from './features/api-explorer/api-explorer.component';
 import { FactionsComponent } from './features/factions/factions.component';
 import { SupplyChainComponent } from './features/data/supply-chain.component';
-import { SystemMapComponent } from './features/systems/system-map.component';
 
 export const routes: Routes = [
   {
@@ -30,7 +29,12 @@ export const routes: Routes = [
         canActivate: [authGuard],
       },
       { path: 'factions', component: FactionsComponent, canActivate: [authGuard] },
-      { path: 'systems', component: SystemMapComponent, canActivate: [authGuard] },
+      {
+        path: 'systems',
+        loadComponent: () =>
+          import('./features/systems/system-map.component').then((m) => m.SystemMapComponent),
+        canActivate: [authGuard],
+      },
       {
         path: 'logbook',
         loadComponent: () => import('./features/logbook/logbook.component').then((m) => m.LogbookComponent),

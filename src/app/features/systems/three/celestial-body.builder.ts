@@ -186,6 +186,7 @@ function addAtmosphereRim(group: Group, radius: number, glowColor: number, plane
 
   const atmosphere = new Mesh(new SphereGeometry(radius * 1.06, 32, 32), material);
   atmosphere.userData['planet'] = planet;
+  atmosphere.userData['decor'] = true;
   group.add(atmosphere);
 }
 
@@ -203,6 +204,7 @@ function addGlowShell(group: Group, radius: number, glowColor: number, planet: P
     }),
   );
   glow.userData['planet'] = planet;
+  glow.userData['decor'] = true;
   group.add(glow);
 }
 
