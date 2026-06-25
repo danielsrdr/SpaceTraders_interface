@@ -21,6 +21,7 @@ import {
   Color,
   Float32BufferAttribute,
   Group,
+  HemisphereLight,
   Line,
   LineBasicMaterial,
   Mesh,
@@ -216,10 +217,14 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private godMarkersGroup: Group | null = null;
   private sunGroup: Group | null = null;
   private sunLight: PointLight | null = null;
+  /** Viewer-side fill light that tracks the camera so ships never silhouette. */
+  private headLight: PointLight | null = null;
   private readonly systemCenter = new Vector3(0, 0, 0);
   private shipMarkers = new Group();
   private shipBlips = new Group();
   private transitArcs = new Group();
+  /** Structural fingerprint of the last-built marker set; skips redundant rebuilds. */
+  private lastMarkerSignature: string | null = null;
   private readonly arcScratch = new Vector3();
   private readonly arcMid = new Vector3();
   private readonly orbitEngine = new SystemOrbitEngine();
@@ -498,6 +503,14 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     host.appendChild(canvasEl);
 
     this.scene.add(new AmbientLight(0x1a2040, 0.12));
+    // Sky/ground hemisphere fill gives ship hulls soft volumetric shading
+    // (the planets are shader-lit, so this only shapes the standard-material
+    // ship meshes). A camera-tracking point light keeps the focused ship lit
+    // from the viewer's side so it never collapses into a black cut-out.
+    this.scene.add(new HemisphereLight(0x9fb6ff, 0x141026, 0.55));
+    this.headLight = new PointLight(0xcfe0ff, 0.85, 0, 1.6);
+    this.headLight.position.copy(this.camera.position);
+    this.scene.add(this.headLight);
 
     this.surfaceBaker = new SurfaceBaker(this.renderer);
 
@@ -683,6 +696,18 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     );
   }
 
+  /**
+   * Yaw/pitch a transit object so its nose (the procedural hull faces -Z)
+   * points along the arc's tangent at progress `t`. Uses a look-ahead sample
+   * on the same bezier the line is drawn from, so the ship banks into the curve.
+   */
+  private orientAlongArc(obj: Object3D, v0: Vector3, v2: Vector3, t: number): void {
+    const ahead = this.sampleTransitArc(v0, v2, Math.min(1, t + 0.03), this.tempVec);
+    if (ahead.distanceToSquared(obj.position) < 1e-5) return;
+    obj.lookAt(ahead);
+    obj.rotateY(Math.PI);
+  }
+
   private updateTransitArcs(elapsed: number): void {
     const dotPulse = 1 + Math.sin(elapsed * 6) * 0.25;
     for (const group of this.transitArcs.children) {
@@ -823,6 +848,17 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
   private updateShipMarkers(fleet: ShipData[], systemSymbol: string): void {
     const selected = this.selectedShipSymbol();
+    const onMap = shipsOnMap(fleet, systemSymbol);
+
+    // Transit polling re-emits the fleet every few seconds purely to refresh
+    // ETA/progress, but per-frame motion is driven by getTransitProgress in the
+    // render loop — not by these markers. Rebuilding every procedural hull on
+    // each poll is what makes navigation stutter, so skip the expensive
+    // teardown unless the fleet's *structure* actually changed.
+    const signature = this.computeMarkerSignature(onMap, systemSymbol, selected);
+    if (signature === this.lastMarkerSignature) return;
+    this.lastMarkerSignature = signature;
+
     while (this.shipMarkers.children.length) {
       const child = this.shipMarkers.children[0];
       this.shipMarkers.remove(child);
@@ -831,7 +867,6 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.clearShipBlips();
     this.clearTransitArcs();
 
-    const onMap = shipsOnMap(fleet, systemSymbol);
     const byWaypoint = new Map<string, ShipData[]>();
 
     for (const ship of onMap) {
@@ -911,6 +946,28 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.syncFollowShip(fleet, systemSymbol);
   }
 
+  /**
+   * Structural fingerprint of the on-map fleet (identity, role, status, location
+   * and transit route). Excludes transit *progress*, which animates per-frame,
+   * so polling that only advances ETA does not trigger a marker rebuild.
+   */
+  private computeMarkerSignature(
+    onMap: ShipData[],
+    systemSymbol: string,
+    selected: string | null,
+  ): string {
+    const parts = onMap
+      .map((s) => {
+        const route = s.nav.route;
+        const leg = shipInTransit(s) && route
+          ? `${route.origin.symbol}>${route.destination.symbol}`
+          : '';
+        return `${s.symbol}|${s.registration.role}|${s.nav.status}|${s.nav.waypointSymbol}|${leg}`;
+      })
+      .sort();
+    return `${systemSymbol}#${selected ?? ''}#${parts.join(',')}`;
+  }
+
   private syncLayoutDisplayPositions(): void {
     for (const [symbol, pos] of this.orbitEngine.getAllPositions()) {
       this.layout.displayPositions.set(symbol, { x: pos.x, z: pos.z });
@@ -984,6 +1041,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       this.orbitEngine.getWorldPosition(data.originSymbol, originPos);
       this.orbitEngine.getWorldPosition(data.destSymbol, destPos);
       this.sampleTransitArc(originPos, destPos, t, child.position);
+      this.orientAlongArc(child, originPos, destPos, t);
       this.syncBlipToMarker(child);
     }
   }
@@ -1008,6 +1066,22 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     }
     this.shipGroup.position.copy(this.followPosition);
     this.shipGroup.visible = !!ship;
+    this.orientFollowShip(ship ?? null);
+  }
+
+  /** Point the followed ship down its travel arc; rest in its built pose otherwise. */
+  private orientFollowShip(ship: ShipData | null): void {
+    if (ship && shipInTransit(ship) && ship.nav.route) {
+      const route = ship.nav.route;
+      if (this.planetByName.has(route.origin.symbol) && this.planetByName.has(route.destination.symbol)) {
+        const t = getTransitProgress(route);
+        this.orbitEngine.getWorldPosition(route.origin.symbol, this.shipResolveA);
+        this.orbitEngine.getWorldPosition(route.destination.symbol, this.shipResolveB);
+        this.orientAlongArc(this.shipGroup, this.shipResolveA, this.shipResolveB, t);
+        return;
+      }
+    }
+    this.shipGroup.rotation.set(0, Math.PI * 0.12, 0);
   }
 
   private resolveShipWorldPosition(ship: ShipData, _systemSymbol: string): Vector3 {
@@ -1422,6 +1496,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       );
       this.camera.lookAt(this.systemCenter);
       this.applyCameraShake();
+      this.headLight?.position.copy(this.camera.position);
       return;
     }
 
@@ -1435,6 +1510,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.camera.position.copy(target).add(offset);
     this.camera.lookAt(target);
     this.applyCameraShake();
+    this.headLight?.position.copy(this.camera.position);
   }
 
   private triggerActionPulse(): void {

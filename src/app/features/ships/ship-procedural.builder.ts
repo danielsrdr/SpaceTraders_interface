@@ -310,35 +310,6 @@ function buildSatelliteVariant(root: Group, accent: number, hull: MeshStandardMa
   return reactors;
 }
 
-function buildSurveyVariant(root: Group, accent: number, hull: MeshStandardMaterial): Mesh[] {
-  const reactors: Mesh[] = [];
-
-  addHotspotMesh(root, 'hotspot-frame', new BoxGeometry(1.35, 0.62, 3.5), hull, [0, 0, 0]);
-  addHotspotMesh(root, 'hotspot-crew', new BoxGeometry(0.85, 0.5, 0.85), hullMaterial(0x1e293b), [0, 0.38, -1.05]);
-  addHotspotMesh(root, 'hotspot-reg', new BoxGeometry(0.38, 0.12, 0.26), hullMaterial(0xfbbf24, 0xfbbf24, 0.45), [0, 0.18, -0.82]);
-  addHotspotMesh(root, 'hotspot-nav', new CylinderGeometry(0.05, 0.03, 2.4, 8), hullMaterial(0x60a5fa), [0.5, 0.85, -0.35], [0.12, 0, 0.35]);
-  addHotspotMesh(root, 'hotspot-nav', new CylinderGeometry(0.05, 0.03, 1.9, 8), hullMaterial(0x60a5fa), [-0.45, 0.7, 0.15], [0.08, 0, -0.3]);
-  addDetail(root, new SphereGeometry(0.22, 12, 12), hullMaterial(0x38bdf8, 0x0ea5e9, 0.35), [0.72, 1.05, -0.35]);
-  addHotspotMesh(root, 'hotspot-cargo', new BoxGeometry(1.0, 0.4, 1.25), hullMaterial(shade(accent, 0.8)), [0, -0.04, 0.55]);
-  addHotspotMesh(root, 'hotspot-fuel', new CylinderGeometry(0.2, 0.24, 1.65, 10), hullMaterial(0x64748b), [-0.78, -0.04, -0.25]);
-  addHotspotMesh(root, 'hotspot-fuel', new CylinderGeometry(0.2, 0.24, 1.65, 10), hullMaterial(0x64748b), [0.78, -0.04, -0.25]);
-
-  for (const x of [-0.38, 0.38]) {
-    reactors.push(
-      addHotspotMesh(
-        root,
-        'hotspot-reactor',
-        new ConeGeometry(0.3, 0.95, 10),
-        hullMaterial(0x22d3ee, 0x0891b2, 0.9),
-        [x, -0.04, 1.85],
-        [Math.PI / 2, 0, 0],
-      ),
-    );
-  }
-
-  return reactors;
-}
-
 function buildIndustrialVariant(root: Group, accent: number, hull: MeshStandardMaterial): Mesh[] {
   const reactors: Mesh[] = [];
 
@@ -368,30 +339,56 @@ function buildIndustrialVariant(root: Group, accent: number, hull: MeshStandardM
   return reactors;
 }
 
-function buildCommandVariant(root: Group, accent: number, hull: MeshStandardMaterial): Mesh[] {
+/**
+ * Capital corvette: a long octagonal hull with a pointed bow, a raised command
+ * bridge with a lit window strip, twin outrigger engine nacelles, and a central
+ * main thruster. Forward is -Z (bow), aft is +Z (exhaust). Every hotspot name is
+ * represented so the 3D ship inspector keeps working.
+ */
+function buildCruiserVariant(root: Group, accent: number, hull: MeshStandardMaterial): Mesh[] {
   const reactors: Mesh[] = [];
+  const panel = hullMaterial(shade(accent, 0.72));
+  const trim = hullMaterial(shade(accent, 1.25), accent, 0.28);
+  const glow = hullMaterial(0x67e8f9, 0x22d3ee, 1.5);
+  const windowMat = hullMaterial(0x0ea5e9, 0x38bdf8, 1.1);
 
-  addHotspotMesh(root, 'hotspot-frame', new BoxGeometry(1.65, 0.78, 3.75), hull, [0, 0, 0]);
-  addHotspotMesh(root, 'hotspot-frame', new BoxGeometry(1.25, 0.95, 1.05), hullMaterial(shade(accent, 1.1)), [0, 0.68, -0.72]);
-  addHotspotMesh(root, 'hotspot-crew', new BoxGeometry(0.92, 0.55, 0.92), hullMaterial(0x1e293b), [0, 0.42, -1.22]);
-  addHotspotMesh(root, 'hotspot-reg', new BoxGeometry(0.46, 0.14, 0.32), hullMaterial(0xfbbf24, 0xfbbf24, 0.45), [0, 0.22, -0.92]);
-  addHotspotMesh(root, 'hotspot-nav', new CylinderGeometry(0.06, 0.06, 1.45, 8), hullMaterial(0x60a5fa), [0, 1.22, -0.45]);
-  addHotspotMesh(root, 'hotspot-cargo', new BoxGeometry(1.25, 0.48, 1.35), hullMaterial(shade(accent, 0.75)), [0, -0.04, 0.62]);
-  addHotspotMesh(root, 'hotspot-fuel', new CylinderGeometry(0.26, 0.3, 2.0, 12), hullMaterial(0x64748b), [-0.95, -0.04, -0.08]);
-  addHotspotMesh(root, 'hotspot-fuel', new CylinderGeometry(0.26, 0.3, 2.0, 12), hullMaterial(0x64748b), [0.95, -0.04, -0.08]);
+  // Central hull: bow cone + faceted main body + tapered stern (flattened).
+  const body = new Group();
+  addHotspotMesh(body, 'hotspot-frame', new ConeGeometry(0.6, 2.0, 8), trim, [0, 0, -2.4], [-Math.PI / 2, 0, 0]);
+  addHotspotMesh(body, 'hotspot-frame', new CylinderGeometry(0.6, 0.74, 2.8, 8), hull, [0, 0, -0.4], [Math.PI / 2, 0, 0]);
+  addHotspotMesh(body, 'hotspot-frame', new CylinderGeometry(0.74, 0.55, 1.4, 8), panel, [0, 0, 1.55], [Math.PI / 2, 0, 0]);
+  body.scale.set(1.12, 0.72, 1.0);
+  root.add(body);
 
-  for (const x of [-0.42, 0.42]) {
+  // Stepped command bridge + lit cockpit window strip.
+  addHotspotMesh(root, 'hotspot-crew', new BoxGeometry(0.82, 0.44, 1.35), panel, [0, 0.52, -0.7]);
+  addDetail(root, new BoxGeometry(0.6, 0.3, 0.7), trim, [0, 0.85, -0.85]);
+  addDetail(root, new BoxGeometry(0.64, 0.1, 0.18), windowMat, [0, 0.62, -1.34]);
+
+  // Antenna mast + sensor blister + registration plate.
+  addHotspotMesh(root, 'hotspot-nav', new CylinderGeometry(0.025, 0.025, 0.95, 6), hullMaterial(0x93c5fd), [0, 1.1, -0.55]);
+  addDetail(root, new SphereGeometry(0.07, 10, 10), hullMaterial(0x93c5fd, 0x60a5fa, 0.9), [0, 1.55, -0.55]);
+  addHotspotMesh(root, 'hotspot-reg', new BoxGeometry(0.4, 0.05, 0.6), hullMaterial(0xfbbf24, 0xfbbf24, 0.5), [0.46, 0.2, 0.2]);
+
+  // Ventral cargo/sensor block.
+  addHotspotMesh(root, 'hotspot-cargo', new BoxGeometry(0.9, 0.45, 1.9), panel, [0, -0.44, 0.2]);
+
+  // Twin engine nacelles on outrigger pylons.
+  for (const side of [-1, 1]) {
+    addDetail(root, new BoxGeometry(1.0, 0.12, 0.5), trim, [side * 0.82, -0.1, 1.35], [0, 0, side * 0.12]);
+    addHotspotMesh(root, 'hotspot-fuel', new CylinderGeometry(0.27, 0.31, 2.3, 12), panel, [side * 1.4, -0.12, 1.05], [Math.PI / 2, 0, 0]);
+    addDetail(root, new ConeGeometry(0.27, 0.65, 14), trim, [side * 1.4, -0.12, -0.35], [-Math.PI / 2, 0, 0]);
     reactors.push(
-      addHotspotMesh(
-        root,
-        'hotspot-reactor',
-        new ConeGeometry(0.36, 1.05, 10),
-        hullMaterial(0x14b8a6, 0x0d9488, 0.9),
-        [x, -0.04, 2.0],
-        [Math.PI / 2, 0, 0],
-      ),
+      addHotspotMesh(root, 'hotspot-reactor', new ConeGeometry(0.27, 0.95, 14), glow, [side * 1.4, -0.12, 2.45], [Math.PI / 2, 0, 0]),
     );
+    addDetail(root, new TorusGeometry(0.25, 0.045, 10, 20), hullMaterial(0xa5f3fc, 0x22d3ee, 0.9), [side * 1.4, -0.12, 2.05], [Math.PI / 2, 0, 0]);
   }
+
+  // Central main thruster.
+  reactors.push(
+    addHotspotMesh(root, 'hotspot-reactor', new ConeGeometry(0.42, 1.05, 16), glow, [0, -0.05, 2.55], [Math.PI / 2, 0, 0]),
+  );
+  addDetail(root, new TorusGeometry(0.36, 0.05, 12, 24), hullMaterial(0xa5f3fc, 0x22d3ee, 0.9), [0, -0.05, 2.15], [Math.PI / 2, 0, 0]);
 
   return reactors;
 }
@@ -402,7 +399,9 @@ export function buildProceduralShip(role: string): ProceduralShipResult {
   const root = new Group();
   root.name = `ship-${role}`;
 
-  const hull = hullMaterial(accent);
+  // Faint accent self-illumination so the hull keeps its colour and never
+  // reads as a flat black silhouette when it drifts away from the sun.
+  const hull = hullMaterial(accent, accent, 0.22);
 
   let reactorMeshes: Mesh[] = [];
   switch (profile) {
@@ -416,13 +415,13 @@ export function buildProceduralShip(role: string): ProceduralShipResult {
       reactorMeshes = buildSatelliteVariant(root, accent, hull);
       break;
     case 'survey':
-      reactorMeshes = buildSurveyVariant(root, accent, hull);
+      reactorMeshes = buildCruiserVariant(root, accent, hull);
       break;
     case 'industrial':
       reactorMeshes = buildIndustrialVariant(root, accent, hull);
       break;
     case 'command':
-      reactorMeshes = buildCommandVariant(root, accent, hull);
+      reactorMeshes = buildCruiserVariant(root, accent, hull);
       break;
     default: {
       const _exhaustive: never = profile;
