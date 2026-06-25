@@ -54,6 +54,7 @@ export class SideNavComponent {
         activity: shipArrived,
         activityKind: 'good',
       },
+      { id: 'autopilot', label: 'Auto-pilot', icon: 'autopilot', route: '/autopilot', locked: false, activity: false },
       {
         id: 'contracts',
         label: 'Contracts',

@@ -144,7 +144,7 @@ export interface GodViewTooltip {
 
 type CameraMode = 'flight' | 'god';
 
-const GOD_VIEW_FILTERS: GodViewFilter[] = ['important', 'all', 'markets', 'ships'];
+const GOD_VIEW_FILTERS: GodViewFilter[] = ['important', 'all', 'markets', 'ships', 'contracts'];
 
 /** Orbital-motion time-warp multipliers (0 = paused). */
 const TIME_SCALE_OPTIONS = [0, 1, 10, 100] as const;
@@ -179,6 +179,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   readonly landingPlanet = input<PlanetView | null>(null);
   readonly landingActive = input(false);
   readonly actionPulse = input(0);
+  /** Waypoints relevant to active contracts (highlighted in god view). */
+  readonly contractWaypoints = input<Set<string>>(new Set<string>());
 
   readonly planetClick = output<PlanetView>();
   readonly shipClick = output<ShipData>();
@@ -348,6 +350,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       focusPlanetName: this.focusPlanetName(),
       selectedPlanetName: this.focusPlanetName(),
       shipCounts: this.shipCountsByWaypoint(),
+      contractWaypoints: this.contractWaypoints(),
     };
   }
 
@@ -368,6 +371,17 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     if (this.sunGroup) {
       this.sunGroup.visible = true;
     }
+  }
+
+  /** Rebuild just the god-view marker discs/rings (e.g. when contract highlights change). */
+  private rebuildGodMarkers(): void {
+    if (!this.godMarkersGroup) return;
+    const ctx = this.godMarkerContext();
+    this.scene.remove(this.godMarkersGroup);
+    disposeObject3D(this.godMarkersGroup);
+    this.godMarkersGroup = buildGodViewMarkers(this.planets(), this.layout, ctx);
+    this.godMarkersGroup.visible = this.cameraMode() === 'god';
+    this.scene.add(this.godMarkersGroup);
   }
 
   private applyGodViewFilter(): void {
@@ -436,6 +450,12 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       if (this.cameraMode() === 'god') {
         this.applyGodViewFilter();
       }
+    });
+
+    effect(() => {
+      this.contractWaypoints();
+      if (!this.sceneReady) return;
+      this.rebuildGodMarkers();
     });
 
     effect(() => {
@@ -1751,6 +1771,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
         return 'Markets';
       case 'ships':
         return 'My ships';
+      case 'contracts':
+        return 'Contracts';
       default: {
         const _exhaustive: never = filter;
         void _exhaustive;

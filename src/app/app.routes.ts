@@ -28,6 +28,12 @@ export const routes: Routes = [
         loadComponent: () => import('./features/ships/ships.component').then((m) => m.ShipsComponent),
         canActivate: [authGuard],
       },
+      {
+        path: 'autopilot',
+        loadComponent: () =>
+          import('./features/automation/autopilot-panel.component').then((m) => m.AutopilotPanelComponent),
+        canActivate: [authGuard],
+      },
       { path: 'factions', component: FactionsComponent, canActivate: [authGuard] },
       {
         path: 'systems',

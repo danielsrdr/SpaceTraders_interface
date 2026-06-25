@@ -6,6 +6,13 @@
     <source src="/assets/sounds/skamkraft_main_theme.mp3" type="audio/mpeg" />
   </audio>
   <app-side-nav />
+  @if (!onlineStatus.online()) {
+    <div
+      class="fixed top-0 right-0 left-0 z-[9997] bg-amber-600/90 py-1 text-center text-xs font-medium text-black"
+    >
+      Offline — showing cached data. Actions are disabled until you reconnect.
+    </div>
+  }
   <main class="m-0 h-screen w-full p-0">
     <router-outlet />
   </main>

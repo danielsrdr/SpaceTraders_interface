@@ -87,7 +87,7 @@ export function buildSurfaceWorld(
 ): SurfaceWorldResult {
   const poiConfig = buildSurfacePoiConfig(planet);
   const heightField = createTerrainHeightField(poiConfig);
-  const terrainManager = createTerrainChunkManager(heightField);
+  const terrainManager = createTerrainChunkManager(heightField, poiConfig);
   const tunnels = createMineTunnelManager(heightField.getPitConfig(), poiConfig.seed);
   const collision = createSurfaceCollision(heightField, tunnels);
   const spawn = heightField.getSpawn();

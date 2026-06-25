@@ -56,6 +56,29 @@
         </ul>
       }
 
+      @if (showRoute()) {
+        @if (route()?.reachable) {
+          <p class="sk-panel-meta mb-1">
+            Route · {{ route()!.totalFuel }} fuel · ~{{ routeEtaLabel() }}
+          </p>
+          <ol class="mb-3 list-inside list-decimal text-sm text-white/85">
+            @for (hop of route()!.hops; track hop.to) {
+              <li>
+                {{ hop.to }}
+                <span class="text-white/50">({{ hop.fuel }} fuel)</span>
+                @if (hop.refuelOnArrival) {
+                  <span class="text-sky-300">· refuel</span>
+                }
+              </li>
+            }
+          </ol>
+        } @else {
+          <p class="mb-3 text-sm text-amber-300">
+            No fuel-safe route to this waypoint with the current ship and flight mode.
+          </p>
+        }
+      }
+
       @if (blockers().length) {
         <div class="mb-3 rounded border border-red-500/40 bg-red-950/40 p-3">
           @for (blocker of blockers(); track blocker.message) {

@@ -52,6 +52,8 @@ const TYPE_MARKER_SIZE: Record<string, number> = {
 /** Trait-driven accent colors for the narrative radar. */
 export const MARKETPLACE_COLOR = 0xfbbf24;
 export const SHIPYARD_COLOR = 0x06b6d4;
+/** Accent for waypoints tied to an active contract's goods/destination. */
+export const CONTRACT_COLOR = 0x34d399;
 const ACCENT_FALLBACK_COLOR = 0x22d3ee;
 
 /** Returns the trait accent color for a waypoint, or null when it has no notable trait. */
@@ -61,13 +63,19 @@ export function waypointTraitColor(planet: PlanetView): number | null {
   return null;
 }
 
-export type GodViewFilter = 'important' | 'all' | 'markets' | 'ships';
+export type GodViewFilter = 'important' | 'all' | 'markets' | 'ships' | 'contracts';
 
 export interface GodMarkerContext {
   filter: GodViewFilter;
   focusPlanetName: string | null;
   selectedPlanetName: string | null;
   shipCounts: Map<string, number>;
+  /** Waypoints relevant to active contracts (delivery targets + good markets). */
+  contractWaypoints?: Set<string>;
+}
+
+function isContractWaypoint(planet: PlanetView, ctx: GodMarkerContext): boolean {
+  return ctx.contractWaypoints?.has(planet.name) ?? false;
 }
 
 export function isWaypointVisibleInFilter(
@@ -81,11 +89,14 @@ export function isWaypointVisibleInFilter(
       return hasTrait(planet, 'MARKETPLACE');
     case 'ships':
       return (ctx.shipCounts.get(planet.name) ?? 0) > 0;
+    case 'contracts':
+      return isContractWaypoint(planet, ctx);
     case 'important':
       return (
         planet.name === ctx.focusPlanetName ||
         planet.name === ctx.selectedPlanetName ||
         (ctx.shipCounts.get(planet.name) ?? 0) > 0 ||
+        isContractWaypoint(planet, ctx) ||
         hasTrait(planet, 'MARKETPLACE') ||
         hasTrait(planet, 'SHIPYARD') ||
         resolveWaypointType(planet.type) === 'JUMP_GATE' ||
@@ -116,9 +127,16 @@ function hasAccent(planet: PlanetView, ctx: GodMarkerContext): boolean {
     planet.name === ctx.focusPlanetName ||
     planet.name === ctx.selectedPlanetName ||
     (ctx.shipCounts.get(planet.name) ?? 0) > 0 ||
+    isContractWaypoint(planet, ctx) ||
     hasTrait(planet, 'MARKETPLACE') ||
     hasTrait(planet, 'SHIPYARD')
   );
+}
+
+/** Accent ring color, prioritising the contract highlight over trait colors. */
+function accentColor(planet: PlanetView, ctx: GodMarkerContext): number {
+  if (isContractWaypoint(planet, ctx)) return CONTRACT_COLOR;
+  return waypointTraitColor(planet) ?? ACCENT_FALLBACK_COLOR;
 }
 
 export function buildGodViewMarkers(
@@ -160,7 +178,7 @@ export function buildGodViewMarkers(
       const ring = new Mesh(
         new RingGeometry(size * 1.35, size * 1.65, 32),
         new MeshBasicMaterial({
-          color: waypointTraitColor(planet) ?? ACCENT_FALLBACK_COLOR,
+          color: accentColor(planet, ctx),
           transparent: true,
           opacity: 0.85,
           depthWrite: false,

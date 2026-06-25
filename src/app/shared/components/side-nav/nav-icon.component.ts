@@ -10,6 +10,7 @@ export type NavIconName =
   | 'profile'
   | 'data'
   | 'api'
+  | 'autopilot'
   | 'logout'
   | 'locked';
 
@@ -81,6 +82,11 @@ export type NavIconName =
         @case ('api') {
           <path d="m8.5 8.5-4 3.5 4 3.5m7-7 4 3.5-4 3.5" />
           <path d="m13.5 6-3 12" />
+        }
+        @case ('autopilot') {
+          <circle cx="12" cy="12" r="8.2" />
+          <circle cx="12" cy="12" r="2" />
+          <path d="M12 3.8v3M12 17.2v3M3.8 12h3M17.2 12h3" />
         }
         @case ('logout') {
           <path d="M12.5 4H5.5C4.7 4 4 4.7 4 5.5v13c0 .8.7 1.5 1.5 1.5h7" />

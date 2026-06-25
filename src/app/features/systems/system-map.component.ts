@@ -140,6 +140,14 @@ import {
 
 import { SystemViewMode, type SurfaceZoneKind } from './three/system-view-mode';
 
+import { TravelExecutorService } from './travel-executor.service';
+
+import { buildRouteNodes } from './routing/route-graph';
+
+import { planRoute, RoutePlan } from './routing/route-planner';
+
+import { ContractOptimizerService } from './contract-optimizer.service';
+
 
 
 type DetailPanel =
@@ -203,6 +211,10 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
   private readonly dialog = inject(DialogService);
 
   private readonly discovery = inject(DiscoveryStore);
+
+  private readonly travelExecutor = inject(TravelExecutorService);
+
+  private readonly contractOptimizer = inject(ContractOptimizerService);
 
 
 
@@ -328,6 +340,8 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly pendingTravelSteps = signal<TravelPlanStep[]>([]);
 
+  readonly contractWaypoints = signal<Set<string>>(new Set<string>());
+
   readonly transitTick = signal(0);
 
   readonly marketSearchResults = computed(() =>
@@ -335,6 +349,44 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
     filterMarketWaypoints(this.planets(), this.searchQuery()),
 
   );
+
+
+
+  readonly travelRoute = computed((): RoutePlan | null => {
+
+    const target = this.travelModalTarget();
+
+    const symbol = this.travelModalShipSymbol();
+
+    if (!target || !symbol) return null;
+
+    const ship = this.ships().find((s) => s.symbol === symbol);
+
+    if (!ship) return null;
+
+    if (ship.nav.systemSymbol !== target.system) return null;
+
+    const start = ship.nav.waypointSymbol;
+
+    if (start === target.name) return null;
+
+    return planRoute({
+
+      nodes: buildRouteNodes(this.planets()),
+
+      start,
+
+      goal: target.name,
+
+      tankCapacity: ship.fuel.capacity,
+
+      currentFuel: ship.fuel.current,
+
+      flightMode: this.flightMode(),
+
+    });
+
+  });
 
   readonly travelModalShips = computed(() => {
 
@@ -706,107 +758,37 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ): Promise<void> {
 
-    for (let i = 0; i < steps.length; i++) {
+    await this.travelExecutor.executeSteps(steps, {
 
-      const step = steps[i]!;
+      shipSymbol,
 
-      switch (step.kind) {
+      planet,
 
-        case 'setFlightMode':
+      reloadShips: () => this.loadShips(),
 
-          await this.api.patchShipNav(shipSymbol, step.mode);
+      getShips: () => this.ships(),
 
-          await this.loadShips();
+      onSurface: (p, remaining) => {
 
-          break;
+        this.pendingTravelSteps.set(remaining);
 
-        case 'orbit':
+        this.landingPlanet.set(p);
 
-          await this.api.orbitShip(shipSymbol, step.waypointSymbol);
+        this.viewMode.set('landing');
 
-          await this.loadShips();
+      },
 
-          break;
+      onOpenMarket: async () => {
 
-        case 'navigate':
+        await this.loadMarket();
 
-          await this.api.navigateShip(shipSymbol, step.waypointSymbol);
+        this.marketOverlayOpen.set(true);
 
-          await this.loadShips();
+        this.pendingMarketOpen.set(false);
 
-          await this.waitForShipAtWaypoint(shipSymbol, step.waypointSymbol);
+      },
 
-          break;
-
-        case 'dock':
-
-          await this.api.dockShip(shipSymbol);
-
-          await this.loadShips();
-
-          break;
-
-        case 'surface': {
-
-          const remaining = steps.slice(i + 1);
-
-          this.pendingTravelSteps.set(remaining);
-
-          this.landingPlanet.set(planet);
-
-          this.viewMode.set('landing');
-
-          return;
-
-        }
-
-        case 'openMarket':
-
-          await this.loadMarket();
-
-          this.marketOverlayOpen.set(true);
-
-          this.pendingMarketOpen.set(false);
-
-          break;
-
-        default: {
-
-          const _exhaustive: never = step;
-
-          void _exhaustive;
-
-        }
-
-      }
-
-    }
-
-  }
-
-
-
-  private async waitForShipAtWaypoint(shipSymbol: string, waypointSymbol: string): Promise<void> {
-
-    for (let attempt = 0; attempt < 180; attempt++) {
-
-      await this.loadShips();
-
-      const ship = this.ships().find((s) => s.symbol === shipSymbol);
-
-      if (!ship) return;
-
-      if (!shipInTransit(ship) && ship.nav.waypointSymbol === waypointSymbol) {
-
-        return;
-
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    }
-
-    throw new Error('Travel timed out waiting for ship to arrive');
+    });
 
   }
 
@@ -2720,9 +2702,33 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
       this.applyBeginnerDefaults();
 
+      void this.refreshContractHighlights();
+
     } catch {
 
       this.snackbar.show('Failed to load waypoints', 'error');
+
+    }
+
+  }
+
+
+
+  private async refreshContractHighlights(): Promise<void> {
+
+    const sysName = this.systemSymbol();
+
+    if (!sysName) return;
+
+    try {
+
+      const set = await this.contractOptimizer.computeForSystem(sysName, this.planets());
+
+      this.contractWaypoints.set(set);
+
+    } catch {
+
+      // Highlights are best-effort; ignore failures.
 
     }
 

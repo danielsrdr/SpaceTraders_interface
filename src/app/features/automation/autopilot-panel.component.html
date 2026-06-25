@@ -1,0 +1,166 @@
+<p class="sk-title">AUTO-PILOT</p>
+
+<div class="sk-page-center px-4">
+  <div class="mx-auto w-full max-w-2xl space-y-4">
+    @if (!online()) {
+      <div class="rounded border border-amber-500/40 bg-amber-950/30 p-2 text-center text-xs text-amber-300">
+        Offline — auto-pilot is disabled until the connection returns.
+      </div>
+    }
+
+    <div class="sk-panel">
+      <p class="sk-panel-heading">Configure loop</p>
+
+      @if (!ships().length) {
+        <p class="sk-panel-meta">No ships available.</p>
+      } @else {
+        <label class="sk-panel-meta mb-1 block" for="ap-ship">Ship</label>
+        <select
+          id="ap-ship"
+          class="sk-select mb-3 w-full"
+          [value]="selectedShipSymbol() ?? ''"
+          (change)="onSelectShip($any($event.target).value)"
+        >
+          @for (ship of ships(); track ship.symbol) {
+            <option [value]="ship.symbol">{{ ship.symbol }} · {{ ship.nav.systemSymbol }}</option>
+          }
+        </select>
+
+        <div class="mb-3 flex gap-2">
+          <button
+            type="button"
+            class="sk-btn flex-1"
+            [class.border-accent]="preset() === 'mining'"
+            (click)="preset.set('mining')"
+          >
+            Mining loop
+          </button>
+          <button
+            type="button"
+            class="sk-btn flex-1"
+            [class.border-accent]="preset() === 'trade'"
+            (click)="preset.set('trade')"
+          >
+            Trade run
+          </button>
+        </div>
+
+        @if (loadingWaypoints()) {
+          <p class="sk-panel-meta">Loading waypoints…</p>
+        } @else if (preset() === 'mining') {
+          <label class="sk-panel-meta mb-1 block" for="ap-asteroid">Asteroid (extract)</label>
+          <select
+            id="ap-asteroid"
+            class="sk-select mb-2 w-full"
+            [ngModel]="asteroidWp()"
+            (ngModelChange)="asteroidWp.set($event)"
+          >
+            @for (w of asteroids(); track w.name) {
+              <option [value]="w.name">{{ w.name }} · {{ w.type }}</option>
+            }
+          </select>
+          <label class="sk-panel-meta mb-1 block" for="ap-market">Market (sell + refuel)</label>
+          <select
+            id="ap-market"
+            class="sk-select mb-3 w-full"
+            [ngModel]="marketWp()"
+            (ngModelChange)="marketWp.set($event)"
+          >
+            @for (w of markets(); track w.name) {
+              <option [value]="w.name">{{ w.name }}</option>
+            }
+          </select>
+        } @else {
+          <label class="sk-panel-meta mb-1 block" for="ap-buy">Buy market</label>
+          <select
+            id="ap-buy"
+            class="sk-select mb-2 w-full"
+            [value]="buyWp()"
+            (change)="onSelectBuyMarket($any($event.target).value)"
+          >
+            @for (w of markets(); track w.name) {
+              <option [value]="w.name">{{ w.name }}</option>
+            }
+          </select>
+          <label class="sk-panel-meta mb-1 block" for="ap-good">Good</label>
+          <select
+            id="ap-good"
+            class="sk-select mb-2 w-full"
+            [ngModel]="tradeGood()"
+            (ngModelChange)="tradeGood.set($event)"
+          >
+            @for (g of buyGoods(); track g) {
+              <option [value]="g">{{ g }}</option>
+            }
+          </select>
+          <label class="sk-panel-meta mb-1 block" for="ap-sell">Sell market</label>
+          <select
+            id="ap-sell"
+            class="sk-select mb-3 w-full"
+            [ngModel]="sellWp()"
+            (ngModelChange)="sellWp.set($event)"
+          >
+            @for (w of markets(); track w.name) {
+              <option [value]="w.name">{{ w.name }}</option>
+            }
+          </select>
+        }
+
+        <button type="button" class="sk-btn w-full" (click)="applyPreset()">Build queue</button>
+      }
+    </div>
+
+    @if (queue(); as q) {
+      <div class="sk-panel">
+        <div class="mb-2 flex items-center justify-between">
+          <p class="sk-panel-heading m-0">Queue</p>
+          <span
+            class="text-xs uppercase"
+            [class.text-emerald-300]="q.status === 'running'"
+            [class.text-amber-300]="q.status === 'paused'"
+            [class.text-red-300]="q.status === 'error'"
+            [class.text-white]="q.status === 'idle'"
+          >
+            {{ q.status }}
+          </span>
+        </div>
+
+        @if (q.message) {
+          <p class="sk-panel-meta mb-2">{{ q.message }}</p>
+        }
+
+        @if (!q.orders.length) {
+          <p class="sk-panel-meta">No orders yet — build a queue above.</p>
+        } @else {
+          <ol class="mb-3 space-y-1 text-sm">
+            @for (order of q.orders; track $index) {
+              <li
+                class="flex items-center gap-2"
+                [class.text-accent]="$index === q.index && q.status === 'running'"
+                [class.text-white]="$index !== q.index"
+              >
+                <span class="w-5 text-right text-white/40">{{ $index + 1 }}</span>
+                <span>{{ describeOrder(order) }}</span>
+                @if ($index === q.index && q.status === 'running') {
+                  <span class="text-accent">◀ now</span>
+                }
+              </li>
+            }
+          </ol>
+
+          <div class="flex flex-wrap gap-2">
+            @if (q.status === 'running') {
+              <button type="button" class="sk-btn flex-1" (click)="pause()">Pause</button>
+            } @else {
+              <button type="button" class="sk-btn flex-1" [disabled]="!online()" (click)="start()">
+                Start
+              </button>
+            }
+            <button type="button" class="sk-btn flex-1" (click)="reset()">Reset</button>
+            <button type="button" class="sk-btn flex-1" (click)="clear()">Clear</button>
+          </div>
+        }
+      </div>
+    }
+  </div>
+</div>

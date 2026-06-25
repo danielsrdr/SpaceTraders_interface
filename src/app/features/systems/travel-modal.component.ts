@@ -9,6 +9,7 @@ import {
   TravelBlocker,
   TravelIntent,
 } from './travel-plan';
+import { RoutePlan } from './routing/route-planner';
 
 const FLIGHT_MODES: ShipNavFlightMode[] = ['DRIFT', 'STEALTH', 'CRUISE', 'BURN'];
 
@@ -24,6 +25,8 @@ export class TravelModalComponent {
   readonly selectedShipSymbol = input<string | null>(null);
   readonly flightMode = input<ShipNavFlightMode>('CRUISE');
   readonly executing = input(false);
+  /** Optional fuel-aware multi-hop route to the target (shown when >1 hop). */
+  readonly route = input<RoutePlan | null>(null);
 
   readonly shipSymbolChange = output<string>();
   readonly flightModeChange = output<ShipNavFlightMode>();
@@ -32,6 +35,19 @@ export class TravelModalComponent {
 
   readonly flightModes = FLIGHT_MODES;
   readonly hasTrait = hasTrait;
+
+  /** Show the route panel only for genuine multi-hop or unreachable routes. */
+  readonly showRoute = computed((): boolean => {
+    const r = this.route();
+    return !!r && (r.hops.length > 1 || !r.reachable);
+  });
+
+  readonly routeEtaLabel = computed((): string => {
+    const r = this.route();
+    if (!r) return '';
+    const mins = Math.round(r.totalTime / 60);
+    return mins >= 1 ? `${mins} min` : `${r.totalTime}s`;
+  });
 
   readonly blockers = computed((): TravelBlocker[] => {
     if (this.executing()) return [];
