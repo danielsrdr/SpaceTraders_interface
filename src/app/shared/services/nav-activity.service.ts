@@ -2,9 +2,12 @@ import { computed, DestroyRef, effect, inject, Injectable, signal } from '@angul
 import { NavigationEnd, Router } from '@angular/router';
 import { AgentStore } from '../../core/state/agent.store';
 import { FleetStore } from '../../core/state/fleet.store';
+import { FlightRecorderStore } from '../../core/state/flight-recorder.store';
 import { ContractView } from '../../models/contract.model';
 import { ShipData } from '../../models/ship.model';
 import { SpaceTradersApiService } from '../../services/spacetraders-api.service';
+import { RadioService } from './radio.service';
+import { ProgressionService } from '../../features/progression/progression.service';
 
 const POLL_INTERVAL_MS = 60_000;
 const EXPIRY_THRESHOLD_MS = 24 * 60 * 60 * 1000;
@@ -21,6 +24,9 @@ export class NavActivityService {
   private readonly api = inject(SpaceTradersApiService);
   private readonly agentStore = inject(AgentStore);
   private readonly fleetStore = inject(FleetStore);
+  private readonly progression = inject(ProgressionService);
+  private readonly flightRecorder = inject(FlightRecorderStore);
+  private readonly radio = inject(RadioService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -116,6 +122,7 @@ export class NavActivityService {
       ]);
       this.contracts.set(contracts);
       this.detectArrivals(ships);
+      this.progression.syncFromFleet(ships);
     } finally {
       this.polling = false;
     }
@@ -129,6 +136,9 @@ export class NavActivityService {
         nowInTransit.add(ship.symbol);
       } else if (this.prevInTransit.has(ship.symbol)) {
         arrived = true;
+        // Capture the completed leg for black-box replay + announce it.
+        this.flightRecorder.recordFromShip(ship);
+        this.radio.announceArrival(ship.symbol, ship.nav.waypointSymbol);
       }
     }
     if (arrived) this.shipArrivedAlert.set(true);

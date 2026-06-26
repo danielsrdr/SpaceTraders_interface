@@ -347,6 +347,33 @@
     background: linear-gradient(90deg, var(--color-warn), var(--color-danger));
   }
 
+  /* Duel comparator: mirror ship A's bar so both fills grow toward the center. */
+  .sk-gauge--rtl .sk-gauge-fill {
+    left: auto;
+    right: 0;
+  }
+
+  .sk-gauge-fill--win {
+    background: linear-gradient(90deg, var(--color-phosphor), #ffffff);
+    box-shadow: 0 0 8px var(--color-phosphor);
+  }
+
+  .sk-duel-vs {
+    @apply inline-flex h-10 w-10 items-center justify-center rounded-full border-2 text-xs font-bold tracking-widest;
+    border-color: var(--color-phosphor-dim);
+    color: var(--color-phosphor);
+    background: rgba(255, 255, 255, 0.04);
+    transition:
+      box-shadow 250ms var(--ease-out-soft),
+      border-color 250ms var(--ease-out-soft);
+  }
+
+  .sk-duel-vs--a,
+  .sk-duel-vs--b {
+    border-color: var(--color-phosphor);
+    box-shadow: 0 0 12px var(--color-phosphor);
+  }
+
   /* Atmospheric entry transition (map -> planet surface) */
   .sk-atmo-burn {
     background: radial-gradient(

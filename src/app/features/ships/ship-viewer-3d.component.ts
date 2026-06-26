@@ -33,12 +33,17 @@ import { buildProceduralShip, disposeShip } from './ship-procedural.builder';
 import { applyShipHealth, isLowHealth } from './ship-visual-state';
 import { resolveHotspotLabel, resolveHotspotTab, type ShipModalTab } from './ship-hotspots';
 
+/** Turntable angular speed (rad/s) used when `autoSpin` is enabled. */
+const SPIN_RATE = 0.45;
+
 @Component({
   selector: 'app-ship-viewer-3d',
   templateUrl: './ship-viewer-3d.component.html',
 })
 export class ShipViewer3dComponent implements AfterViewInit, OnDestroy {
   readonly ship = input.required<ShipData>();
+  /** Continuously rotate the model on its vertical axis (e.g. duel turntable). */
+  readonly autoSpin = input(false);
   readonly partClick = output<Exclude<ShipModalTab, null>>();
 
   @ViewChild('host', { static: true }) hostRef!: ElementRef<HTMLDivElement>;
@@ -60,6 +65,7 @@ export class ShipViewer3dComponent implements AfterViewInit, OnDestroy {
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
   private readonly clock = new Clock();
+  private lastFrameElapsed = 0;
   private animFrameId = 0;
   private resizeObserver: ResizeObserver | null = null;
   private disposed = false;
@@ -251,9 +257,14 @@ export class ShipViewer3dComponent implements AfterViewInit, OnDestroy {
       this.animFrameId = requestAnimationFrame(render);
 
       const elapsed = this.clock.getElapsedTime();
+      const frameDelta = elapsed - this.lastFrameElapsed;
+      this.lastFrameElapsed = elapsed;
       if (this.shipGroup && !this.reduceMotion) {
         if (!this.focused) {
           this.shipGroup.position.y = Math.sin(elapsed * 1.2) * 0.06;
+          if (this.autoSpin()) {
+            this.shipGroup.rotation.y += frameDelta * SPIN_RATE;
+          }
         }
         for (let i = 0; i < this.reactorMeshes.length; i++) {
           const mesh = this.reactorMeshes[i];

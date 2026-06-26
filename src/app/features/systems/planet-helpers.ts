@@ -200,6 +200,107 @@ export function getTransitProgress(route: ShipNavRoute, now = Date.now()): numbe
   return Math.min(1, Math.max(0, (now - dep) / (arr - dep)));
 }
 
+/** Client-side anchor for 3D transit motion (decoupled from shifting API timestamps). */
+interface VisualTransitAnchor {
+  /** Wall-clock ms when visual progress was 0 for this leg. */
+  startedAt: number;
+  durationMs: number;
+  maxT: number;
+}
+
+const visualTransitByLeg = new Map<string, VisualTransitAnchor>();
+
+function routeDurationMs(route: ShipNavRoute): number {
+  const dep = new Date(route.departureTime).getTime();
+  const arr = new Date(route.arrival).getTime();
+  if (!Number.isFinite(dep) || !Number.isFinite(arr) || arr <= dep) return 60_000;
+  return arr - dep;
+}
+
+/** Cache key for an in-transit leg, or null when the ship is not travelling. */
+export function transitLegKey(ship: ShipData): string | null {
+  const route = ship.nav.route;
+  if (!route || !shipInTransit(ship)) return null;
+  return `${ship.symbol}:${route.origin.symbol}>${route.destination.symbol}`;
+}
+
+/** Drop cached visual progress for one ship (or the entire fleet). */
+export function clearStableTransitProgress(shipSymbol?: string): void {
+  if (!shipSymbol) {
+    visualTransitByLeg.clear();
+    return;
+  }
+  const prefix = `${shipSymbol}:`;
+  for (const key of visualTransitByLeg.keys()) {
+    if (key.startsWith(prefix)) visualTransitByLeg.delete(key);
+  }
+}
+
+/** Create or extend the wall-clock anchor for a ship's current transit leg. */
+function anchorTransitLeg(ship: ShipData, now = Date.now()): VisualTransitAnchor | null {
+  const route = ship.nav.route;
+  const key = transitLegKey(ship);
+  if (!route || !key) return null;
+
+  const apiDuration = routeDurationMs(route);
+  let anchor = visualTransitByLeg.get(key);
+  if (!anchor) {
+    const initialT = getTransitProgress(route, now);
+    anchor = {
+      startedAt: now - initialT * apiDuration,
+      durationMs: apiDuration,
+      maxT: initialT,
+    };
+    visualTransitByLeg.set(key, anchor);
+    return anchor;
+  }
+
+  const elapsed = now - anchor.startedAt;
+  // Extend duration when the API pushes arrival later; never shrink below elapsed time.
+  anchor.durationMs = Math.max(anchor.durationMs, apiDuration, elapsed + 500);
+  return anchor;
+}
+
+/**
+ * Monotonic transit progress for 3D rendering. Driven by a client wall-clock anchor
+ * seeded from the API on first sight of a leg, so poll refreshes that shift
+ * route timestamps cannot roll the ship backward on the arc.
+ */
+export function getStableTransitProgress(ship: ShipData, now = Date.now()): number {
+  if (!shipInTransit(ship) || !ship.nav.route) return 0;
+  const anchor = anchorTransitLeg(ship, now);
+  if (!anchor) return 0;
+  const raw = Math.min(1, (now - anchor.startedAt) / anchor.durationMs);
+  anchor.maxT = Math.max(anchor.maxT, raw);
+  return anchor.maxT;
+}
+
+/** Evict or extend visual-progress anchors after a fleet refresh. */
+export function evictStableTransitProgressOnRefresh(prev: ShipData[], next: ShipData[]): void {
+  const nextSymbols = new Set(next.map((s) => s.symbol));
+  for (const before of prev) {
+    if (!nextSymbols.has(before.symbol)) {
+      clearStableTransitProgress(before.symbol);
+    }
+  }
+
+  for (const ship of next) {
+    const before = prev.find((s) => s.symbol === ship.symbol);
+    const afterKey = transitLegKey(ship);
+    const beforeKey = before ? transitLegKey(before) : null;
+
+    if (!afterKey) {
+      if (beforeKey) clearStableTransitProgress(ship.symbol);
+      continue;
+    }
+
+    if (beforeKey !== afterKey) {
+      clearStableTransitProgress(ship.symbol);
+    }
+    anchorTransitLeg(ship);
+  }
+}
+
 export function routeWaypointCanvasPosition(
   waypoint: ShipNavRouteWaypoint,
   layout: MapLayout,

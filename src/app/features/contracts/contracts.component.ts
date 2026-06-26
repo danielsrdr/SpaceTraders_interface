@@ -5,6 +5,7 @@ import { LogbookStore } from '../../core/state/logbook.store';
 import { ContractTerms, ContractView, mapContract } from '../../models/contract.model';
 import { ShipData } from '../../models/ship.model';
 import { DiscoveryStore } from '../../core/state/discovery.store';
+import { ProgressionService } from '../progression/progression.service';
 import { SpaceTradersApiService } from '../../services/spacetraders-api.service';
 import { PageBackgroundService } from '../../shared/services/page-background.service';
 import { SnackbarService } from '../../shared/services/snackbar.service';
@@ -26,6 +27,7 @@ export class ContractsComponent implements OnInit {
   private readonly background = inject(PageBackgroundService);
   private readonly snackbar = inject(SnackbarService);
   private readonly discovery = inject(DiscoveryStore);
+  private readonly progression = inject(ProgressionService);
   private readonly logbook = inject(LogbookStore);
   private readonly sound = inject(SoundService);
   private readonly router = inject(Router);
@@ -151,6 +153,7 @@ export class ContractsComponent implements OnInit {
     try {
       await this.api.acceptContract(contract.id);
       this.discovery.unlockFactions();
+      this.progression.recordContract({ payment: contract.paymentAccepted, faction: contract.faction });
       this.logbook.recordContract(`Accepted ${contract.type} contract`);
       this.sound.playAccept();
       await this.load();
@@ -167,6 +170,7 @@ export class ContractsComponent implements OnInit {
     this.fulfillingId.set(contract.id);
     try {
       await this.api.fulfillContract(contract.id);
+      this.progression.recordContract({ payment: contract.paymentFulfill, faction: contract.faction });
       this.logbook.recordContract(`Fulfilled ${contract.type} contract (+${contract.paymentFulfill.toLocaleString()}c)`);
       this.sound.playFulfill();
       this.triggerCelebrate();

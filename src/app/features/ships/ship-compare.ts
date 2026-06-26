@@ -41,6 +41,17 @@ function makeRow(
   };
 }
 
+/** Tally per-row winners into an overall duel verdict. */
+export function overallWinner(rows: CompareRow[]): 'a' | 'b' | 'tie' {
+  let a = 0;
+  let b = 0;
+  for (const row of rows) {
+    if (row.winner === 'a') a++;
+    else if (row.winner === 'b') b++;
+  }
+  return a > b ? 'a' : b > a ? 'b' : 'tie';
+}
+
 export function compareShips(a: ShipData, b: ShipData): CompareRow[] {
   const percent = (value: number): string => `${value}%`;
   return [

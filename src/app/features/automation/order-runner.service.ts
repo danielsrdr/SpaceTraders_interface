@@ -5,6 +5,7 @@ import { LogbookStore } from '../../core/state/logbook.store';
 import { OrderQueueStore } from '../../core/state/order-queue.store';
 import { ShipCargo, ShipData } from '../../models/ship.model';
 import { TravelExecutorService } from '../systems/travel-executor.service';
+import { ProgressionService } from '../progression/progression.service';
 import { Order, describeOrder } from './order.types';
 
 const FUEL_GOODS = new Set(['FUEL']);
@@ -21,6 +22,7 @@ export class OrderRunnerService {
   private readonly logbook = inject(LogbookStore);
   private readonly store = inject(OrderQueueStore);
   private readonly travel = inject(TravelExecutorService);
+  private readonly progression = inject(ProgressionService);
 
   private readonly running = new Set<string>();
 
@@ -130,10 +132,19 @@ export class OrderRunnerService {
     if (ship.nav.waypointSymbol === waypointSymbol && ship.nav.status !== 'IN_TRANSIT') {
       return;
     }
+    const origin = ship.nav.waypointSymbol;
     if (ship.nav.status === 'DOCKED') {
       await this.api.orbitShip(shipSymbol);
     }
-    await this.api.navigateShip(shipSymbol, waypointSymbol);
+    const res = await this.api.navigateShip(shipSymbol, waypointSymbol);
+    this.progression.recordNavigate({
+      ship: shipSymbol,
+      origin,
+      destination: waypointSymbol,
+      system: res.data.nav.systemSymbol,
+      destinationType: res.data.nav.route?.destination?.type,
+      fuelConsumed: res.data.fuel?.consumed?.amount,
+    });
     await this.syncFleet();
     await this.travel.waitForShipAtWaypoint(shipSymbol, waypointSymbol, {
       reloadShips: () => this.syncFleet(),
@@ -153,6 +164,7 @@ export class OrderRunnerService {
         const res = await this.api.extractResources(shipSymbol);
         const y = res.data.extraction.yield;
         this.logbook.recordExtraction('extract', shipSymbol, y.symbol, y.units);
+        this.progression.recordExtraction({ ship: shipSymbol, good: y.symbol, units: y.units });
       } catch (error) {
         // Surface meaningful extraction failures (e.g. not at an asteroid).
         throw error instanceof Error ? error : new Error('Extraction failed');
@@ -171,6 +183,15 @@ export class OrderRunnerService {
     const res = await this.api.purchaseCargo(shipSymbol, tradeSymbol, free);
     const tx = res.data.transaction;
     this.logbook.recordTrade('buy', shipSymbol, tx.units, tx.tradeSymbol, tx.totalPrice, tx.waypointSymbol);
+    this.progression.recordTrade({
+      mode: 'buy',
+      ship: shipSymbol,
+      units: tx.units,
+      good: tx.tradeSymbol,
+      totalPrice: tx.totalPrice,
+      waypoint: tx.waypointSymbol,
+      credits: res.data.agent?.credits,
+    });
     await this.syncFleet();
   }
 
@@ -185,6 +206,15 @@ export class OrderRunnerService {
         const res = await this.api.sellCargo(shipSymbol, item.symbol, item.units);
         const tx = res.data.transaction;
         this.logbook.recordTrade('sell', shipSymbol, tx.units, tx.tradeSymbol, tx.totalPrice, tx.waypointSymbol);
+        this.progression.recordTrade({
+          mode: 'sell',
+          ship: shipSymbol,
+          units: tx.units,
+          good: tx.tradeSymbol,
+          totalPrice: tx.totalPrice,
+          waypoint: tx.waypointSymbol,
+          credits: res.data.agent?.credits,
+        });
       } catch {
         // Market may not buy this good here — skip it and keep going.
       }
@@ -201,6 +231,13 @@ export class OrderRunnerService {
       const res = await this.api.refuelShip(shipSymbol, needed);
       const tx = res.data.transaction;
       this.logbook.recordRefuel(shipSymbol, tx?.units ?? needed, tx?.totalPrice ?? null, tx?.waypointSymbol);
+      this.progression.recordRefuel({
+        ship: shipSymbol,
+        units: tx?.units ?? needed,
+        totalPrice: tx?.totalPrice ?? null,
+        waypoint: tx?.waypointSymbol,
+        credits: res.data.agent?.credits,
+      });
     } catch {
       // No fuel market here; continue without refuelling.
     }

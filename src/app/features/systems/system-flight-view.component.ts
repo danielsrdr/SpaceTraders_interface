@@ -39,10 +39,13 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { ShipData } from '../../models/ship.model';
+import { ShipCargo, ShipData } from '../../models/ship.model';
 import { PlanetView } from '../../models/system.model';
+import { RadioService } from '../../shared/services/radio.service';
+import { SpaceWeatherService, type WeatherKind } from '../../shared/services/space-weather.service';
+import { Voyage } from '../../core/state/flight-recorder.store';
 import {
-  getTransitProgress,
+  getStableTransitProgress,
   shipInTransit,
   shipOrbitOffset,
   shipsOnMap,
@@ -72,6 +75,9 @@ import {
   updateOrbitTicks,
 } from './three/orbit-rings.builder';
 import { buildSystemSun } from './three/system-sun.builder';
+import { buildCockpit, type CockpitBuildResult } from './three/cockpit.builder';
+import { createPointerLockControls } from './three/fps-controls';
+import type { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 import { SystemOrbitEngine } from './three/system-orbit.engine';
 import { computeSystemLayout3d, shipOrbitDistance, SystemLayout3d } from './three/system-scene.layout';
 import { LandingAnimation } from './three/landing-animation';
@@ -109,7 +115,7 @@ export interface GodViewTooltip {
   shipCount: number;
 }
 
-type CameraMode = 'flight' | 'god';
+type CameraMode = 'flight' | 'god' | 'cockpit';
 
 const GOD_VIEW_FILTERS: GodViewFilter[] = ['important', 'all', 'markets', 'ships', 'contracts'];
 
@@ -137,17 +143,33 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   readonly focusShipSymbol = input<string | null>(null);
   readonly selectedShipSymbol = input<string | null>(null);
   readonly selectedShipRole = input<string | null>(null);
+  /** Full selected ship (for the cockpit fuel gauge). */
+  readonly selectedShip = input<ShipData | null>(null);
+  /** Selected ship's cargo manifest when loaded (for the cockpit cargo gauge). */
+  readonly selectedCargo = input<ShipCargo | null>(null);
   readonly landingPlanet = input<PlanetView | null>(null);
   readonly landingActive = input(false);
   readonly actionPulse = input(0);
   /** Waypoints relevant to active contracts (highlighted in god view). */
   readonly contractWaypoints = input<Set<string>>(new Set<string>());
+  /** When set, replays the given past voyage as a deterministic camera flythrough. */
+  readonly replayVoyage = input<Voyage | null>(null);
 
   readonly planetClick = output<PlanetView>();
   readonly shipClick = output<ShipData>();
   readonly landingComplete = output<void>();
+  /** Emitted when the user closes the black-box replay. */
+  readonly replayExit = output<void>();
 
   readonly cameraMode = signal<CameraMode>('flight');
+  /** True while the pointer is locked for cockpit mouse-look. */
+  readonly cockpitLocked = signal(false);
+  // Black-box replay state.
+  readonly replayActive = signal(false);
+  readonly replayPlaying = signal(false);
+  /** Replay timeline progress in [0, 1]. */
+  readonly replayT = signal(0);
+  readonly replayLabel = signal('');
   readonly planetLabels = signal<PlanetScreenLabel[]>([]);
   readonly landingFade = signal(0);
   readonly showPlanetNames = signal(true);
@@ -173,6 +195,13 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   @ViewChild('radar', { static: true }) radarRef!: ElementRef<HTMLCanvasElement>;
 
   private readonly zone = inject(NgZone);
+  private readonly radio = inject(RadioService);
+  private readonly spaceWeather = inject(SpaceWeatherService);
+  /** Control-radio mute state (shared, persisted). */
+  readonly radioMuted = this.radio.muted;
+  /** Sensor quality (1 clear, ->0 storm) + active weather, surfaced for the HUD. */
+  readonly sensorQuality = signal(1);
+  readonly weatherEvent = signal<WeatherKind | null>(null);
   private scene!: Scene;
   private camera!: PerspectiveCamera;
   private renderer!: WebGLRenderer;
@@ -197,6 +226,12 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private godMarkersGroup: Group | null = null;
   private sunGroup: Group | null = null;
   private sunLight: PointLight | null = null;
+  /** Base (weather-free) sun intensity; flares pulse above this. */
+  private baseSunIntensity = 3.5;
+  /** Nebula dome material driven by solar flares. */
+  private nebulaMaterial: ShaderMaterial | null = null;
+  /** Throttle for pushing weather state to the (Angular) HUD signals. */
+  private lastWeatherUiMs = 0;
   /** Viewer-side fill light that tracks the camera so ships never silhouette. */
   private headLight: PointLight | null = null;
   private readonly systemCenter = new Vector3(0, 0, 0);
@@ -205,6 +240,10 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private readonly landing = new LandingAnimation();
   /** Structural fingerprint of the last-built marker set; skips redundant rebuilds. */
   private lastMarkerSignature: string | null = null;
+  /** Skips tearing down the orbit scene when the waypoint list is unchanged. */
+  private lastPlanetBuildSignature: string | null = null;
+  /** Last focus target; avoids re-snapping the camera on every fleet poll. */
+  private lastCameraFocusKey: string | null = null;
   private readonly orbitEngine = new SystemOrbitEngine();
   private layout: SystemLayout3d = {
     scale: 2,
@@ -250,6 +289,18 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private readonly tempVec = new Vector3();
   private followPosition = new Vector3();
 
+  // Cockpit (first-person) mode.
+  private cockpitResult: CockpitBuildResult | null = null;
+  private cockpitControls: PointerLockControls | null = null;
+  /** Eye position relative to the followed ship's center while seated. */
+  private readonly seatOffset = new Vector3(0, 0.6, 0);
+
+  // Black-box replay.
+  private activeVoyage: Voyage | null = null;
+  /** Wall-clock seconds for a full timeline pass, regardless of trip length. */
+  private readonly replayPlaybackSeconds = 16;
+  private cameraModeBeforeReplay: CameraMode = 'flight';
+
   // Pre-allocated scratch vectors reused every frame to avoid GC pressure.
   private readonly camOffsetScratch = new Vector3();
   private readonly camTargetScratch = new Vector3();
@@ -268,21 +319,179 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private lowPixelRatio = false;
   private lastRadarDraw = 0;
 
+  /** Toggle the global (god) view against the ship-chase (flight) view. */
   toggleCameraMode(): void {
-    const next = this.cameraMode() === 'flight' ? 'god' : 'flight';
+    if (this.replayActive()) return;
+    this.applyCameraMode(this.cameraMode() === 'god' ? 'flight' : 'god');
+  }
+
+  /** Toggle the first-person cockpit against the ship-chase (flight) view. */
+  toggleCockpit(): void {
+    if (this.replayActive()) return;
+    this.applyCameraMode(this.cameraMode() === 'cockpit' ? 'flight' : 'cockpit');
+  }
+
+  private applyCameraMode(next: CameraMode): void {
+    const prev = this.cameraMode();
+    if (prev === next) return;
     this.cameraMode.set(next);
+
+    if (prev === 'cockpit') this.exitCockpit();
     if (next === 'god') {
       this.godViewYaw = this.cameraYaw;
       this.godViewPitch = 1.15;
-    } else {
+    }
+    if (next === 'cockpit') this.enterCockpit();
+    if (next !== 'god') {
       this.hoveredPlanet.set(null);
       this.hoverTooltip.set(null);
     }
     this.updateGodModeVisibility();
   }
 
+  private enterCockpit(): void {
+    if (!this.cockpitResult) {
+      this.cockpitResult = buildCockpit();
+      this.camera.add(this.cockpitResult.group);
+      // Pick up the canopy-glass material in the uTime refresh loop.
+      this.refreshAnimatedMaterials();
+    }
+    this.cockpitResult.group.visible = true;
+    this.redrawCockpitGauges();
+    // Seat the camera on the ship and face the system core as a sane default;
+    // PointerLockControls then drives look from this orientation.
+    this.camera.position.copy(this.followPosition).add(this.seatOffset);
+    this.camera.lookAt(this.systemCenter);
+  }
+
+  private exitCockpit(): void {
+    if (this.cockpitControls?.isLocked) this.cockpitControls.unlock();
+    if (this.cockpitResult) this.cockpitResult.group.visible = false;
+    this.cockpitLocked.set(false);
+  }
+
+  private ensureCockpitControls(): PointerLockControls {
+    if (!this.cockpitControls) {
+      this.cockpitControls = createPointerLockControls(this.camera, this.renderer.domElement);
+      this.cockpitControls.addEventListener('lock', () =>
+        this.zone.run(() => this.cockpitLocked.set(true)),
+      );
+      this.cockpitControls.addEventListener('unlock', () =>
+        this.zone.run(() => this.cockpitLocked.set(false)),
+      );
+    }
+    return this.cockpitControls;
+  }
+
+  /** Lock the pointer for mouse-look; must be called from a user gesture. */
+  private requestCockpitLock(): void {
+    if (this.cameraMode() !== 'cockpit') return;
+    this.ensureCockpitControls().lock();
+  }
+
+  private redrawCockpitGauges(): void {
+    if (!this.cockpitResult) return;
+    const ship = this.selectedShip();
+    const fuel = ship ? { current: ship.fuel.current, capacity: ship.fuel.capacity } : null;
+    const cargo = this.selectedCargo() ?? ship?.cargo ?? null;
+    this.cockpitResult.drawGauges(
+      fuel,
+      cargo ? { units: cargo.units, capacity: cargo.capacity } : null,
+      ship?.symbol ?? '',
+    );
+  }
+
+  // --- Black-box replay -----------------------------------------------------
+
+  private startReplay(voyage: Voyage): void {
+    this.activeVoyage = voyage;
+    this.cameraModeBeforeReplay = this.cameraMode();
+    if (this.cameraMode() === 'cockpit') this.exitCockpit();
+    this.cameraMode.set('flight');
+    this.updateGodModeVisibility();
+
+    this.replayActive.set(true);
+    this.replayT.set(0);
+    this.replayPlaying.set(true);
+    this.replayLabel.set(`${voyage.ship} · ${voyage.originSymbol} → ${voyage.destinationSymbol}`);
+
+    // Hide the live fleet markers/arcs during the cinematic.
+    this.shipMarkers.markers.visible = false;
+    this.shipMarkers.blips.visible = false;
+    this.transit.arcs.visible = false;
+  }
+
+  private stopReplay(): void {
+    this.activeVoyage = null;
+    this.replayActive.set(false);
+    this.replayPlaying.set(false);
+    this.replayT.set(0);
+
+    this.shipMarkers.markers.visible = true;
+    this.shipMarkers.blips.visible = true;
+    this.transit.arcs.visible = true;
+
+    // Restore the prior camera and re-sync the live ship.
+    this.cameraMode.set(this.cameraModeBeforeReplay === 'cockpit' ? 'flight' : this.cameraModeBeforeReplay);
+    this.updateGodModeVisibility();
+    this.syncFollowShip(this.ships(), this.systemSymbol());
+  }
+
+  replayPlayPause(): void {
+    if (!this.replayActive()) return;
+    // Restart from the top if finished.
+    if (!this.replayPlaying() && this.replayT() >= 1) this.replayT.set(0);
+    this.replayPlaying.update((p) => !p);
+  }
+
+  replayScrub(value: number): void {
+    if (!this.replayActive()) return;
+    this.replayPlaying.set(false);
+    this.replayT.set(Math.max(0, Math.min(1, value)));
+  }
+
+  exitReplay(): void {
+    this.stopReplay();
+    this.zone.run(() => this.replayExit.emit());
+  }
+
+  /** Advance the replay timeline and fly the ship along the recorded arc. */
+  private updateReplay(delta: number): void {
+    const voyage = this.activeVoyage;
+    if (!voyage) return;
+
+    if (this.replayPlaying()) {
+      const next = Math.min(1, this.replayT() + delta / this.replayPlaybackSeconds);
+      this.zone.run(() => {
+        this.replayT.set(next);
+        if (next >= 1) this.replayPlaying.set(false);
+      });
+    }
+
+    const t = this.replayT();
+    const durationSec = Math.max(1, (voyage.arrivalTime - voyage.departureTime) / 1000);
+    // Seek the deterministic orbit engine to the historical-epoch time so the
+    // planets sit where they were (reproducibly) for the whole trip.
+    this.orbitEngine.seekTo(voyage.departureTime / 1000 + t * durationSec);
+    this.applyOrbitalPositions();
+    this.applyBodySpin(delta);
+
+    // Fly the recorded arc between the (live-moving) endpoints.
+    this.orbitEngine.getWorldPosition(voyage.originSymbol, this.shipResolveA);
+    this.orbitEngine.getWorldPosition(voyage.destinationSymbol, this.shipResolveB);
+    sampleTransitArc(this.shipResolveA, this.shipResolveB, t, this.shipResolveResult);
+    this.followPosition.copy(this.shipResolveResult);
+    this.shipGroup.position.copy(this.followPosition);
+    this.shipGroup.visible = true;
+    orientAlongArc(this.shipGroup, this.shipResolveA, this.shipResolveB, t, this.tempVec);
+  }
+
   togglePlanetNames(): void {
     this.showPlanetNames.update((v) => !v);
+  }
+
+  toggleRadio(): void {
+    this.radio.toggleMute();
   }
 
   setGodViewFilter(filter: GodViewFilter): void {
@@ -320,6 +529,9 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     }
     if (this.sunGroup) {
       this.sunGroup.visible = true;
+    }
+    if (this.cockpitResult) {
+      this.cockpitResult.group.visible = this.cameraMode() === 'cockpit';
     }
   }
 
@@ -373,11 +585,24 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
     effect(() => {
       const symbol = this.focusShipSymbol();
+      if (!this.sceneReady || !symbol) {
+        this.lastCameraFocusKey = null;
+        return;
+      }
       const fleet = this.ships();
       const sys = this.systemSymbol();
-      if (!this.sceneReady || !symbol) return;
       const ship = fleet.find((s) => s.symbol === symbol);
-      if (ship) this.focusOnShip(ship, sys);
+      if (!ship) return;
+
+      const route = ship.nav.route;
+      const leg =
+        shipInTransit(ship) && route
+          ? `${route.origin.symbol}>${route.destination.symbol}`
+          : ship.nav.waypointSymbol;
+      const key = `${symbol}|${ship.nav.status}|${leg}`;
+      if (key === this.lastCameraFocusKey) return;
+      this.lastCameraFocusKey = key;
+      this.focusOnShip(ship, sys);
     });
 
     effect(() => {
@@ -413,6 +638,31 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       if (!this.sceneReady || pulse === 0) return;
       this.triggerActionPulse();
     });
+
+    effect(() => {
+      // Repaint the diegetic cockpit gauges when fuel/cargo change.
+      this.selectedShip();
+      this.selectedCargo();
+      if (!this.sceneReady || this.cameraMode() !== 'cockpit') return;
+      this.redrawCockpitGauges();
+    });
+
+    effect(() => {
+      const voyage = this.replayVoyage();
+      // Re-run once planets for the voyage's system are present.
+      this.planets();
+      if (!this.sceneReady) return;
+      if (voyage) {
+        const ready =
+          this.planetByName.has(voyage.originSymbol) &&
+          this.planetByName.has(voyage.destinationSymbol);
+        if (ready && this.activeVoyage?.id !== voyage.id) {
+          this.startReplay(voyage);
+        }
+      } else if (this.activeVoyage) {
+        this.stopReplay();
+      }
+    });
   }
 
   ngAfterViewInit(): void {
@@ -435,6 +685,9 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.shipMarkers.dispose();
     this.transit.dispose();
     if (this.shipGroup) disposeShip(this.shipGroup);
+    if (this.cockpitControls?.isLocked) this.cockpitControls.unlock();
+    this.cockpitControls?.disconnect();
+    this.cockpitResult?.dispose();
     this.surfaceBaker?.dispose();
     this.composer?.dispose();
     this.renderer?.dispose();
@@ -475,7 +728,14 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
     this.scene = new Scene();
     this.scene.background = new Color(0x050810);
-    this.scene.add(buildNebulaBackground());
+    const nebula = buildNebulaBackground();
+    nebula.traverse((obj) => {
+      const mat = (obj as Mesh).material;
+      if (mat instanceof ShaderMaterial && mat.uniforms['uFlare']) {
+        this.nebulaMaterial = mat;
+      }
+    });
+    this.scene.add(nebula);
     this.scene.add(buildStarfieldEnhanced());
 
     const sun = buildSystemSun(Math.max(10, 8));
@@ -485,6 +745,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
     this.camera = new PerspectiveCamera(55, 1, 0.1, 4000);
     this.camera.position.set(0, 4, 12);
+    // Added to the scene graph so camera-parented cockpit meshes render.
+    this.scene.add(this.camera);
 
     this.renderer = new WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setPixelRatio(this.targetPixelRatio());
@@ -617,9 +879,19 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   }
 
   private rebuildPlanets(planets: PlanetView[]): void {
+    const sig = this.planetsBuildSignature(planets);
+    if (sig === this.lastPlanetBuildSignature && this.planetEntries.length > 0) return;
+
+    const preserveSimTime = this.planetEntries.length > 0;
+    const savedSimTime = preserveSimTime ? this.orbitEngine.currentTime : 0;
+    this.lastPlanetBuildSignature = sig;
+
     this.clearPlanets();
     this.layout = computeSystemLayout3d(planets);
     this.orbitEngine.build(planets, this.layout);
+    if (preserveSimTime) {
+      this.orbitEngine.seekTo(savedSimTime);
+    }
     this.syncLayoutDisplayPositions();
 
     if (this.orbitRingsGroup) {
@@ -687,12 +959,24 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
     if (this.sunLight) {
       const extent = this.orbitEngine.sceneExtent(planets);
-      this.sunLight.intensity = Math.min(5, 2.5 + extent * 0.008);
+      this.baseSunIntensity = Math.min(5, 2.5 + extent * 0.008);
+      this.sunLight.intensity = this.baseSunIntensity;
       this.sunLight.distance = extent * 6;
     }
 
     this.refreshAnimatedMaterials();
     this.drawRadar();
+  }
+
+  private planetsBuildSignature(planets: PlanetView[]): string {
+    return planets
+      .map((p) => `${p.name}|${p.type}|${p.position.x},${p.position.y}|${p.orbits ?? ''}`)
+      .sort()
+      .join(';');
+  }
+
+  private fleetBySymbol(fleet: ShipData[]): ReadonlyMap<string, ShipData> {
+    return new Map(fleet.map((s) => [s.symbol, s]));
   }
 
   private clearPlanets(): void {
@@ -710,7 +994,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     const onMap = shipsOnMap(fleet, systemSymbol);
 
     // Transit polling re-emits the fleet every few seconds purely to refresh
-    // ETA/progress, but per-frame motion is driven by getTransitProgress in the
+    // ETA/progress, but per-frame motion is driven by getStableTransitProgress in the
     // render loop — not by these markers. Rebuilding every procedural hull on
     // each poll is what makes navigation stutter, so skip the expensive
     // teardown unless the fleet's *structure* actually changed.
@@ -721,7 +1005,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.shipMarkers.rebuild(onMap, selected, this.planetByName);
     this.transit.rebuild(onMap, selected, this.planetByName);
 
-    this.shipMarkers.applyPositions(this.orbitEngine, this.planetByName);
+    this.shipMarkers.applyPositions(this.orbitEngine, this.planetByName, this.fleetBySymbol(fleet));
     this.syncFollowShip(fleet, systemSymbol);
   }
 
@@ -751,20 +1035,25 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       syncEphemerisTrails(this.ephemerisTrailsGroup, this.orbitEngine.getAllPositions());
     }
 
-    this.shipMarkers.applyPositions(this.orbitEngine, this.planetByName);
+    this.shipMarkers.applyPositions(
+      this.orbitEngine,
+      this.planetByName,
+      this.fleetBySymbol(this.ships()),
+    );
 
     if (this.landingActive() && this.landing.target) {
       this.orbitEngine.getWorldPosition(this.landing.target.name, this.tempVec);
       this.landing.retarget(this.tempVec);
     }
 
-    if (this.cameraMode() === 'flight' && !this.landingActive()) {
+    if (this.cameraMode() !== 'god' && !this.landingActive()) {
       this.syncFollowShip(this.ships(), this.systemSymbol());
     }
   }
 
   private syncFollowShip(fleet: ShipData[], systemSymbol: string): void {
-    if (this.cameraMode() === 'god') return;
+    // Replay drives the ship/camera itself; skip the live follow.
+    if (this.cameraMode() === 'god' || this.replayActive()) return;
 
     const selected = this.selectedShipSymbol();
     const ship = selected ? fleet.find((s) => s.symbol === selected) : null;
@@ -775,7 +1064,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       this.followPosition.copy(first.group.position).add(this.bodyViewOffset(first.radius));
     }
     this.shipGroup.position.copy(this.followPosition);
-    this.shipGroup.visible = !!ship;
+    // In first-person we sit inside the hull, so hide our own ship mesh.
+    this.shipGroup.visible = this.cameraMode() === 'cockpit' ? false : !!ship;
     this.orientFollowShip(ship ?? null);
   }
 
@@ -784,7 +1074,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     if (ship && shipInTransit(ship) && ship.nav.route) {
       const route = ship.nav.route;
       if (this.planetByName.has(route.origin.symbol) && this.planetByName.has(route.destination.symbol)) {
-        const t = getTransitProgress(route);
+        const t = getStableTransitProgress(ship);
         this.orbitEngine.getWorldPosition(route.origin.symbol, this.shipResolveA);
         this.orbitEngine.getWorldPosition(route.destination.symbol, this.shipResolveB);
         orientAlongArc(this.shipGroup, this.shipResolveA, this.shipResolveB, t, this.tempVec);
@@ -800,7 +1090,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       const originEntry = this.planetByName.get(route.origin.symbol);
       const destEntry = this.planetByName.get(route.destination.symbol);
       if (originEntry && destEntry) {
-        const t = getTransitProgress(route);
+        const t = getStableTransitProgress(ship);
         this.orbitEngine.getWorldPosition(route.origin.symbol, this.shipResolveA);
         this.orbitEngine.getWorldPosition(route.destination.symbol, this.shipResolveB);
         sampleTransitArc(this.shipResolveA, this.shipResolveB, t, this.shipResolveResult);
@@ -898,7 +1188,9 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     if (event.code === 'KeyP') {
-      if (this.cameraMode() === 'flight') {
+      if (this.cameraMode() === 'cockpit') {
+        this.camera.lookAt(this.systemCenter);
+      } else if (this.cameraMode() === 'flight') {
         this.cameraYaw = 0;
         this.cameraPitch = 0.25;
       } else {
@@ -909,6 +1201,9 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     if (event.code === 'KeyG') {
       this.toggleCameraMode();
     }
+    if (event.code === 'KeyC') {
+      this.toggleCockpit();
+    }
   };
 
   private readonly onKeyUp = (_event: KeyboardEvent): void => {
@@ -917,6 +1212,11 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
   private readonly onPointerDown = (event: PointerEvent): void => {
     if (event.button !== 0) return;
+    if (this.cameraMode() === 'cockpit') {
+      // Click anywhere captures the pointer for mouse-look.
+      this.requestCockpitLock();
+      return;
+    }
     this.pointerDownX = event.clientX;
     this.pointerDownY = event.clientY;
     this.lastPointerClientX = event.clientX;
@@ -931,6 +1231,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   };
 
   private readonly onPointerMove = (event: PointerEvent): void => {
+    if (this.cameraMode() === 'cockpit') return;
     this.updatePointer(event);
     this.lastPointerClientX = event.clientX;
     this.lastPointerClientY = event.clientY;
@@ -953,6 +1254,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
   private readonly onPointerUp = (event: PointerEvent): void => {
     if (event.button !== 0) return;
+    if (this.cameraMode() === 'cockpit') return;
     this.isDragging = false;
     const moved = Math.hypot(event.clientX - this.pointerDownX, event.clientY - this.pointerDownY) > 6;
     if (!moved && !this.landingActive()) {
@@ -1104,13 +1406,18 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       const elapsed = this.clock.getElapsedTime();
       const warpedDelta = delta * this.timeScale();
 
-      this.orbitEngine.tick(warpedDelta);
-      this.applyOrbitalPositions();
-      this.applyBodySpin(warpedDelta);
+      this.updateSpaceWeather(frameStart);
+      if (this.replayActive()) {
+        this.updateReplay(delta);
+      } else {
+        this.orbitEngine.tick(warpedDelta);
+        this.applyOrbitalPositions();
+        this.applyBodySpin(warpedDelta);
+      }
       this.applyPlanetLod();
       this.updateAnimatedMaterials(elapsed);
       this.shipMarkers.animate(elapsed);
-      this.transit.update(elapsed, this.orbitEngine);
+      this.transit.update(elapsed, this.orbitEngine, this.fleetBySymbol(this.ships()));
 
       if (this.landingActive() && this.landing.target) {
         const frame = this.landing.update(delta);
@@ -1244,6 +1551,15 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   }
 
   private updateCamera(): void {
+    if (this.cameraMode() === 'cockpit') {
+      // Seat the eye on the (moving) ship; PointerLockControls owns rotation, so
+      // we only drive position here and never call lookAt.
+      this.camera.position.copy(this.followPosition).add(this.seatOffset);
+      this.applyCameraShake();
+      this.headLight?.position.copy(this.camera.position);
+      return;
+    }
+
     if (this.cameraMode() === 'god') {
       const extent = this.orbitEngine.sceneExtent(this.planets());
       const dist = extent * 1.7;
@@ -1313,6 +1629,34 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  /** Advance space weather and push it to the nebula, sun, and HUD signals. */
+  private updateSpaceWeather(nowMs: number): void {
+    this.spaceWeather.update(nowMs);
+    const flare = this.spaceWeather.flare;
+    const [fr, fg, fb] = this.spaceWeather.flareColor;
+
+    if (this.nebulaMaterial) {
+      this.nebulaMaterial.uniforms['uFlare']!.value = flare;
+      (this.nebulaMaterial.uniforms['uFlareColor']!.value as Color).setRGB(fr, fg, fb);
+    }
+    if (this.sunLight) {
+      this.sunLight.intensity = this.baseSunIntensity * (1 + flare * 0.5);
+    }
+
+    // Surface the sensor state to the HUD at a throttled rate (limits CD churn).
+    if (nowMs - this.lastWeatherUiMs > 200) {
+      this.lastWeatherUiMs = nowMs;
+      const q = Math.round(this.spaceWeather.sensorQuality * 100) / 100;
+      const ev = this.spaceWeather.event();
+      if (this.sensorQuality() !== q || this.weatherEvent() !== ev) {
+        this.zone.run(() => {
+          this.sensorQuality.set(q);
+          this.weatherEvent.set(ev);
+        });
+      }
+    }
+  }
+
   private drawRadar(): void {
     const canvas = this.radarRef?.nativeElement;
     if (!canvas) return;
@@ -1334,6 +1678,10 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     const cx = w / 2;
     const cy = h / 2;
     const range = Math.max(80, this.orbitEngine.sceneExtent(this.planets()) * 0.85);
+    // Sensor quality shrinks detection range and adds static (fog of war).
+    const q = this.spaceWeather.sensorQuality;
+    const detectRange = range * (0.4 + 0.6 * q);
+    const jitter = (1 - q) * 3;
 
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = 'rgba(10, 14, 26, 0.85)';
@@ -1360,9 +1708,9 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       const dx = entry.group.position.x - anchor.x;
       const dz = entry.group.position.z - anchor.z;
       const dist = Math.hypot(dx, dz);
-      if (dist > range) continue;
-      const px = cx + (dx / range) * (cx - 8);
-      const py = cy + (dz / range) * (cy - 8);
+      if (dist > detectRange) continue;
+      const px = cx + (dx / range) * (cx - 8) + (Math.random() - 0.5) * jitter;
+      const py = cy + (dz / range) * (cy - 8) + (Math.random() - 0.5) * jitter;
       ctx.fillStyle = '#38bdf8';
       ctx.beginPath();
       ctx.arc(px, py, 4, 0, Math.PI * 2);
@@ -1373,6 +1721,25 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     ctx.beginPath();
     ctx.arc(cx, cy, 3, 0, Math.PI * 2);
     ctx.fill();
+
+    // Sensor interference: static speckle + wash that grows as quality drops.
+    if (q < 0.985) {
+      const noise = 1 - q;
+      const speckles = Math.floor(noise * 90);
+      ctx.fillStyle = 'rgba(190, 220, 255, 0.5)';
+      for (let i = 0; i < speckles; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.random() * (cx - 4);
+        ctx.fillRect(cx + Math.cos(a) * r, cy + Math.sin(a) * r, 1.5, 1.5);
+      }
+      ctx.save();
+      ctx.globalAlpha = noise * 0.28;
+      ctx.fillStyle = '#f8b65a';
+      ctx.beginPath();
+      ctx.arc(cx, cy, cx - 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
 
     if (now < this.radarFlashUntil) {
       const intensity = (this.radarFlashUntil - now) / 450;

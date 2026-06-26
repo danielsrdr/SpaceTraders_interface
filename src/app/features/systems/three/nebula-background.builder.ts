@@ -27,6 +27,9 @@ export function buildNebulaBackground(): Group {
     new ShaderMaterial({
       uniforms: {
         uTime: { value: 0 },
+        // Driven by SpaceWeatherService: solar flares light up the clouds.
+        uFlare: { value: 0 },
+        uFlareColor: { value: new Color(1.0, 0.55, 0.2) },
       },
       vertexShader: `
         varying vec3 vDir;
@@ -37,6 +40,8 @@ export function buildNebulaBackground(): Group {
       `,
       fragmentShader: `
         uniform float uTime;
+        uniform float uFlare;
+        uniform vec3 uFlareColor;
         varying vec3 vDir;
 
         ${NOISE_GLSL}
@@ -57,6 +62,9 @@ export function buildNebulaBackground(): Group {
           col = mix(col, neb1, smoothstep(0.45, 0.8, n) * 0.7);
           col = mix(col, neb2, smoothstep(0.5, 0.85, n2) * 0.4);
           col += vec3(0.5, 0.45, 0.6) * band * 0.25;
+
+          // Solar-flare wash: ignite the clouds along the dust lanes.
+          col += uFlareColor * (uFlare * (0.15 + 0.85 * n2));
 
           gl_FragColor = vec4(col, 1.0);
         }

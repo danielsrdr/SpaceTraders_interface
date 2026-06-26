@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { FactionData } from '../../models/faction.model';
 import { SpaceTradersApiService } from '../../services/spacetraders-api.service';
+import { ProgressionService } from '../progression/progression.service';
 import { PageBackgroundService } from '../../shared/services/page-background.service';
 import { SnackbarService } from '../../shared/services/snackbar.service';
 import { factionColor } from '../../shared/faction-colors';
@@ -15,6 +16,7 @@ import { ContractMiniMapComponent } from '../contracts/contract-mini-map.compone
 })
 export class FactionsComponent implements OnInit {
   private readonly api = inject(SpaceTradersApiService);
+  private readonly progression = inject(ProgressionService);
   private readonly background = inject(PageBackgroundService);
   private readonly snackbar = inject(SnackbarService);
   private readonly router = inject(Router);
@@ -59,6 +61,7 @@ export class FactionsComponent implements OnInit {
   async selectFaction(faction: FactionData): Promise<void> {
     this.detailLoading.set(true);
     this.selected.set(faction);
+    this.progression.markFactionViewed(faction.symbol);
     try {
       const detail = await this.api.getFaction(faction.symbol);
       this.selected.set(detail);

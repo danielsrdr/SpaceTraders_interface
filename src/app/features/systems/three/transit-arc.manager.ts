@@ -11,7 +11,7 @@ import {
   Vector3,
 } from 'three';
 import { ShipData } from '../../../models/ship.model';
-import { getTransitProgress, shipInTransit } from '../planet-helpers';
+import { getStableTransitProgress, shipInTransit } from '../planet-helpers';
 import { transitArcLift } from './transit-arc.math';
 import { SystemOrbitEngine } from './system-orbit.engine';
 import { disposeObject3D } from './three-dispose.util';
@@ -65,12 +65,18 @@ export class TransitArcManager {
   }
 
   /** Re-fit each arc to current orbital positions and advance the dot. */
-  update(elapsed: number, orbitEngine: SystemOrbitEngine): void {
+  update(
+    elapsed: number,
+    orbitEngine: SystemOrbitEngine,
+    fleetBySymbol: ReadonlyMap<string, ShipData>,
+  ): void {
     const dotPulse = 1 + Math.sin(elapsed * 6) * 0.25;
     for (const group of this.arcs.children) {
       const arc = group.userData['arc'] as TransitArcData | undefined;
       if (!arc) continue;
-      const route = arc.ship.nav.route;
+      const ship = fleetBySymbol.get(arc.ship.symbol) ?? arc.ship;
+      arc.ship = ship;
+      const route = ship.nav.route;
       if (!route) continue;
 
       orbitEngine.getWorldPosition(route.origin.symbol, arc.curve.v0);
@@ -87,7 +93,7 @@ export class TransitArcManager {
       }
       attr.needsUpdate = true;
 
-      arc.curve.getPoint(getTransitProgress(route), this.scratch);
+      arc.curve.getPoint(getStableTransitProgress(ship), this.scratch);
       arc.dot.position.copy(this.scratch);
       arc.dot.scale.setScalar(dotPulse);
     }

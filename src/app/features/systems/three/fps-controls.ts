@@ -73,6 +73,7 @@ export class FpsControls {
     const gravity = 22;
     const playerHeight = 1.7;
     const playerRadius = 0.35;
+    const stepHeight = 0.4;
 
     this.velocity.y -= gravity * delta;
 
@@ -97,8 +98,17 @@ export class FpsControls {
       ? (x: number, y: number, z: number) => mode.collision.isSolid(x, y, z)
       : solidCheck;
 
+    // Capsule body spans from just above the feet (so low obstacles are
+    // steppable, not blocking) up to the eye/head.
+    const bodyFeetY = this.camera.position.y - playerHeight;
+    const bodyLowerY = bodyFeetY + stepHeight;
+    const headY = this.camera.position.y;
+
     const blockedX =
       this.collides(nextX, this.camera.position.y, this.camera.position.z, playerRadius, playerHeight, checkSolid) ||
+      (mode
+        ? mode.collision.blocksCapsuleBody(nextX, this.camera.position.z, playerRadius, bodyLowerY, headY)
+        : false) ||
       (mode?.useTerrainHeight &&
         isSteepTerrainBlocked(mode.collision, nextX, this.camera.position.z, this.camera.position.y));
 
@@ -108,6 +118,9 @@ export class FpsControls {
 
     const blockedZ =
       this.collides(this.camera.position.x, this.camera.position.y, nextZ, playerRadius, playerHeight, checkSolid) ||
+      (mode
+        ? mode.collision.blocksCapsuleBody(this.camera.position.x, nextZ, playerRadius, bodyLowerY, headY)
+        : false) ||
       (mode?.useTerrainHeight &&
         isSteepTerrainBlocked(mode.collision, this.camera.position.x, nextZ, this.camera.position.y));
 
@@ -115,37 +128,63 @@ export class FpsControls {
       this.camera.position.z = nextZ;
     }
 
-    const feetY = nextY - playerHeight;
+    const nextFeetY = nextY - playerHeight;
 
     if (mode?.useTerrainHeight) {
       const ground =
         mode.collision.getGroundHeight(this.camera.position.x, this.camera.position.z) + 0.05;
+      // Highest collider top we can stand on / step up onto (e.g. crates, low rubble).
+      const colliderTop = mode.collision.supportHeight(
+        this.camera.position.x,
+        this.camera.position.z,
+        playerRadius,
+        bodyFeetY + stepHeight,
+      );
+      const support = Math.max(ground, colliderTop);
       const undergroundSolid = checkSolid(
         this.camera.position.x,
-        feetY,
+        nextFeetY,
         this.camera.position.z,
       );
 
       if (undergroundSolid && this.velocity.y <= 0) {
-        nextY = Math.max(ground + playerHeight, feetY + playerHeight);
+        nextY = Math.max(support + playerHeight, nextFeetY + playerHeight);
         this.velocity.y = 0;
         if (this.state.jump) {
           this.velocity.y = 9;
         }
-      } else if (feetY <= ground && this.velocity.y <= 0) {
-        nextY = ground + playerHeight;
+      } else if (nextFeetY <= support && this.velocity.y <= 0) {
+        nextY = support + playerHeight;
         this.velocity.y = 0;
         if (this.state.jump) {
           this.velocity.y = 9;
         }
       }
-    } else if (this.collides(this.camera.position.x, feetY, this.camera.position.z, playerRadius, playerHeight, checkSolid)) {
+    } else if (this.collides(this.camera.position.x, nextFeetY, this.camera.position.z, playerRadius, playerHeight, checkSolid)) {
       if (this.velocity.y <= 0) {
-        nextY = Math.ceil(feetY) + playerHeight;
+        nextY = Math.ceil(nextFeetY) + playerHeight;
         this.velocity.y = 0;
         if (this.state.jump) {
           this.velocity.y = 9;
         }
+      }
+    }
+
+    // Ceiling: stop the head passing through an overhead collider or a tunnel
+    // ceiling block while rising.
+    if (mode && nextY > this.camera.position.y) {
+      let ceiling = mode.collision.ceilingHeight(
+        this.camera.position.x,
+        this.camera.position.z,
+        playerRadius,
+        headY,
+      );
+      if (checkSolid(this.camera.position.x, nextY, this.camera.position.z)) {
+        ceiling = Math.min(ceiling, Math.floor(nextY));
+      }
+      if (nextY > ceiling) {
+        nextY = ceiling;
+        if (this.velocity.y > 0) this.velocity.y = 0;
       }
     }
 

@@ -25,14 +25,25 @@
         <p class="mt-1 text-[11px] text-slate-400/90">
           @if (cameraMode() === 'god') {
             Global view — drag to orbit · G: ship view · click waypoint to travel · hover for details
+          } @else if (cameraMode() === 'cockpit') {
+            Cockpit — click to look around · move the mouse to pan · C: exit · Esc: release pointer
           } @else {
-            Click planet to travel · Click ship to select · G: global view · Drag: orbit camera
+            Click planet to travel · Click ship to select · G: global view · C: cockpit · Drag: orbit camera
           }
         </p>
       </div>
       <div class="pointer-events-auto flex flex-col items-end gap-1">
         <button type="button" class="sk-btn px-3 py-1 text-xs" (click)="toggleCameraMode()">
           {{ cameraMode() === 'god' ? 'Ship view' : 'Global view' }}
+        </button>
+        <button
+          type="button"
+          class="sk-btn px-3 py-1 text-xs"
+          [class.ring-1]="cameraMode() === 'cockpit'"
+          [class.ring-cyan-400]="cameraMode() === 'cockpit'"
+          (click)="toggleCockpit()"
+        >
+          {{ cameraMode() === 'cockpit' ? 'Exit cockpit' : 'Cockpit' }}
         </button>
         <div class="mt-1 flex gap-1">
           @for (scale of timeScaleOptions; track scale) {
@@ -55,6 +66,15 @@
           (click)="toggleBloom()"
         >
           {{ highQuality() ? 'Bloom: High' : 'Bloom: Off' }}
+        </button>
+        <button
+          type="button"
+          class="sk-btn mt-1 px-2 py-0.5 text-[10px]"
+          [class.ring-1]="!radioMuted()"
+          [class.ring-cyan-400]="!radioMuted()"
+          (click)="toggleRadio()"
+        >
+          {{ radioMuted() ? 'Radio: Off' : 'Radio: On' }}
         </button>
         @if (cameraMode() === 'god') {
           <button type="button" class="sk-btn px-3 py-1 text-xs" (click)="togglePlanetNames()">
@@ -121,6 +141,67 @@
       @if (tip.shipCount > 0) {
         <p class="mt-1 mb-0 text-sky-300">{{ tip.shipCount }} ship{{ tip.shipCount === 1 ? '' : 's' }} here</p>
       }
+    </div>
+  }
+
+  @if (weatherEvent() || sensorQuality() < 0.92) {
+    <div
+      class="pointer-events-none absolute inset-0 z-10"
+      [style.opacity]="(1 - sensorQuality()) * 0.85"
+      style="background: radial-gradient(circle at 50% 45%, transparent 38%, rgba(8, 12, 24, 0.6) 100%)"
+    ></div>
+    <div class="pointer-events-none absolute top-16 left-1/2 z-20 -translate-x-1/2">
+      <span
+        class="rounded bg-rose-950/70 px-2.5 py-1 font-display text-[11px] tracking-[0.35em] text-rose-200/90 uppercase ring-1 ring-rose-400/50"
+      >
+        @if (weatherEvent() === 'solar-flare') {
+          Solar flare
+        } @else {
+          Sensors degraded
+        }
+      </span>
+    </div>
+  }
+
+  @if (cameraMode() === 'cockpit' && !cockpitLocked()) {
+    <div class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+      <span
+        class="rounded-md bg-slate-950/70 px-3 py-1.5 font-display text-xs tracking-[0.3em] text-cyan-200/90 uppercase ring-1 ring-cyan-500/40"
+      >
+        Click to look around
+      </span>
+    </div>
+  }
+
+  @if (replayActive()) {
+    <div class="pointer-events-none absolute inset-0 z-20">
+      <div class="absolute top-16 left-1/2 -translate-x-1/2">
+        <span
+          class="rounded bg-violet-950/70 px-2.5 py-1 font-display text-[11px] tracking-[0.3em] text-violet-200/90 uppercase ring-1 ring-violet-400/50"
+        >
+          Black box replay
+        </span>
+      </div>
+      <div
+        class="pointer-events-auto absolute bottom-6 left-1/2 w-[min(92vw,520px)] -translate-x-1/2 rounded-lg border border-violet-500/40 bg-slate-950/85 p-3 shadow-lg"
+      >
+        <p class="m-0 mb-2 truncate text-xs text-violet-200/90">{{ replayLabel() }}</p>
+        <div class="flex items-center gap-2">
+          <button type="button" class="sk-btn px-3 py-1 text-xs" (click)="replayPlayPause()">
+            {{ replayPlaying() ? 'Pause' : 'Play' }}
+          </button>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.001"
+            class="flex-1 accent-violet-400"
+            [value]="replayT()"
+            (input)="replayScrub(+$any($event.target).value)"
+          />
+          <button type="button" class="sk-btn px-3 py-1 text-xs" (click)="exitReplay()">Exit</button>
+        </div>
+      </div>
     </div>
   }
 

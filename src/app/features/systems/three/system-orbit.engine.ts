@@ -245,6 +245,21 @@ export class SystemOrbitEngine {
     this.recomputePositions();
   }
 
+  /**
+   * Jump the simulation to an absolute time (seconds since build) and recompute
+   * positions. Motion is a pure function of time, so this enables exact,
+   * reversible scrubbing for the black-box replay.
+   */
+  seekTo(absoluteSeconds: number): void {
+    this.simTime = absoluteSeconds;
+    if (this.bodies.size) this.recomputePositions();
+  }
+
+  /** Current absolute simulation time (seconds since build). */
+  get currentTime(): number {
+    return this.simTime;
+  }
+
   /** Position of a body relative to its parent (focus at origin) at a given mean anomaly. */
   private orbitalPoint(body: OrbitBody, meanAnomaly: number, target: Vector3): Vector3 {
     const E = solveKepler(meanAnomaly, body.e);

@@ -19,8 +19,11 @@ import {
   DirectionalLight,
   Fog,
   HemisphereLight,
+  Mesh,
+  MeshStandardMaterial,
   PCFSoftShadowMap,
   PerspectiveCamera,
+  PointLight,
   Scene,
   Vector3,
   WebGLRenderer,
@@ -46,6 +49,23 @@ import {
 } from './three/terrain/terrain-material';
 import { buildSkydome } from './three/surface-props.builder';
 import type { SurfaceZoneKind } from './three/system-view-mode';
+
+/** Seconds for one full surface day -> night -> day cycle. */
+const DAY_LENGTH_S = 150;
+
+const SKY_DAY = new Color(0xc7e4ff);
+const SKY_DUSK = new Color(0xe8915a);
+const SKY_NIGHT = new Color(0x0a1024);
+const FOG_DAY = new Color(0xe8c896);
+const FOG_DUSK = new Color(0xc4632f);
+const FOG_NIGHT = new Color(0x0a1228);
+const SUN_NOON = new Color(0xfff7ed);
+const SUN_DUSK = new Color(0xff9a4d);
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
 
 export interface SurfacePoiLabel {
   kind: SurfaceZoneKind;
@@ -91,7 +111,16 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   private camera!: PerspectiveCamera;
   private renderer!: WebGLRenderer;
   private sun!: DirectionalLight;
+  private hemi!: HemisphereLight;
+  private ambient!: AmbientLight;
   private fps!: FpsControls;
+
+  // Day/night cycle scratch + tagged emitters that brighten after dusk.
+  private readonly sunColorScratch = new Color();
+  private readonly skyScratch = new Color();
+  private readonly fogScratch = new Color();
+  private nightLights: { light: PointLight; base: number }[] = [];
+  private nightGlows: { mat: MeshStandardMaterial; base: number }[] = [];
   private world: SurfaceWorldResult | null = null;
   private readonly clock = new Clock();
   private animFrameId = 0;
@@ -270,8 +299,10 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     canvasEl.style.height = '100%';
     host.appendChild(canvasEl);
 
-    this.scene.add(new HemisphereLight(0x93c5fd, 0xd4a574, 0.45));
-    this.scene.add(new AmbientLight(0xfff7ed, 0.18));
+    this.hemi = new HemisphereLight(0x93c5fd, 0xd4a574, 0.45);
+    this.scene.add(this.hemi);
+    this.ambient = new AmbientLight(0xfff7ed, 0.18);
+    this.scene.add(this.ambient);
 
     this.sun = new DirectionalLight(0xfff7ed, 1.4);
     this.sun.position.set(40, 70, 30);
@@ -325,6 +356,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     this.camera.position.set(this.world.spawn.x, this.world.spawn.y, this.world.spawn.z);
     this.camera.rotation.set(0, 0, 0);
     this.world.terrainManager.update(this.world.spawn.x, this.world.spawn.z);
+    this.collectNightEmitters();
   }
 
   private clearWorld(): void {
@@ -355,7 +387,10 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     );
     world.root.add(built.group);
     world.marketStalls = built.stalls;
+    world.colliders.removeTag('market');
+    built.colliders.forEach((c) => world.colliders.add(c, 'market'));
     this.focusedStall.set(null);
+    this.collectNightEmitters();
   }
 
   private attachListeners(): void {
@@ -447,6 +482,74 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     this.renderer.setSize(width, height, false);
   }
 
+  /** Cache the day/night-sensitive emitters so the loop avoids re-traversing. */
+  private collectNightEmitters(): void {
+    this.nightLights = [];
+    this.nightGlows = [];
+    const root = this.world?.root;
+    if (!root) return;
+    root.traverse((obj) => {
+      const nl = obj.userData['nightLight'];
+      if (typeof nl === 'number' && obj instanceof PointLight) {
+        this.nightLights.push({ light: obj, base: nl });
+      }
+      const ng = obj.userData['nightGlow'];
+      if (typeof ng === 'number' && obj instanceof Mesh) {
+        const mat = obj.material;
+        if (mat instanceof MeshStandardMaterial) {
+          this.nightGlows.push({ mat, base: ng });
+        }
+      }
+    });
+  }
+
+  /**
+   * Sweeps the sun across the sky over {@link DAY_LENGTH_S}: shadows rotate with
+   * the light, sky/fog/ambient lerp through day -> dusk -> night, and tagged
+   * building lights ramp on after dusk. Gas giants keep their static atmosphere.
+   */
+  private updateDayNight(elapsed: number): void {
+    if (!this.world || this.isGasGiant()) return;
+
+    const angle = (elapsed / DAY_LENGTH_S) * Math.PI * 2;
+    const elevation = Math.sin(angle);
+    this.sun.position.set(Math.cos(angle) * 80, elevation * 90, 30);
+
+    const dayness = smoothstep(-0.08, 0.25, elevation); // 0 night -> 1 full day
+    const night = 1 - dayness;
+    // Warm tint while the sun rides low near the horizon.
+    const dusk = Math.max(0, 1 - Math.abs(elevation) / 0.22) * dayness;
+
+    this.sun.intensity = 0.04 + dayness * 1.5;
+    this.sun.color.copy(this.sunColorScratch.copy(SUN_NOON).lerp(SUN_DUSK, dusk));
+
+    if (this.scene.background instanceof Color) {
+      this.scene.background.copy(
+        this.skyScratch.copy(SKY_NIGHT).lerp(SKY_DAY, dayness).lerp(SKY_DUSK, dusk * 0.6),
+      );
+    }
+    if (this.scene.fog instanceof Fog) {
+      this.scene.fog.color.copy(
+        this.fogScratch.copy(FOG_NIGHT).lerp(FOG_DAY, dayness).lerp(FOG_DUSK, dusk * 0.6),
+      );
+      this.scene.fog.near = 55;
+      this.scene.fog.far = 130 + dayness * 110;
+    }
+
+    this.hemi.intensity = 0.12 + dayness * 0.45;
+    this.ambient.intensity = 0.05 + dayness * 0.14;
+
+    setTerrainSunDirection(
+      this.world.terrainManager.material,
+      this.sun.position.x,
+      this.sun.position.y,
+      this.sun.position.z,
+    );
+
+    for (const nl of this.nightLights) nl.light.intensity = nl.base * night;
+    for (const ng of this.nightGlows) ng.mat.emissiveIntensity = ng.base * (0.4 + 0.9 * night);
+  }
+
   private startRenderLoop(): void {
     const render = (): void => {
       if (this.disposed) return;
@@ -456,6 +559,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
 
       if (this.world) {
         updateTerrainMaterialTime(this.world.terrainManager.material, elapsed);
+        this.updateDayNight(elapsed);
       }
 
       if (this.entryRunning()) {

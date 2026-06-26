@@ -27,6 +27,7 @@ import { FleetStore } from '../../core/state/fleet.store';
 import { DiscoveryStore } from '../../core/state/discovery.store';
 
 import { logCategoryClass, LogbookStore, LogEntry } from '../../core/state/logbook.store';
+import { FlightRecorderStore, Voyage } from '../../core/state/flight-recorder.store';
 
 import { getAgentSystem } from '../../models/agent.model';
 
@@ -59,12 +60,14 @@ import {
 } from '../../models/system.model';
 
 import { SpaceTradersApiService } from '../../services/spacetraders-api.service';
+import { ProgressionService } from '../progression/progression.service';
 
 import { DialogService } from '../../shared/services/dialog.service';
 
 import { PageBackgroundService } from '../../shared/services/page-background.service';
 
 import { SnackbarService } from '../../shared/services/snackbar.service';
+import { RadioService } from '../../shared/services/radio.service';
 
 import {
 
@@ -148,6 +151,14 @@ import { planRoute, RoutePlan } from './routing/route-planner';
 
 import { ContractOptimizerService } from './contract-optimizer.service';
 
+import { buildSnapshot, encodeSnapshotWithGuard } from '../spectate/spectate-state';
+
+import { shareOrCopyUrl } from '../../shared/share.util';
+
+import { PostcardDialogComponent } from '../postcard/postcard-dialog.component';
+
+import { PostcardOptions } from '../postcard/postcard-canvas';
+
 
 
 type DetailPanel =
@@ -184,6 +195,7 @@ const FLIGHT_MODES: ShipNavFlightMode[] = ['DRIFT', 'STEALTH', 'CRUISE', 'BURN']
     TravelModalComponent,
     TradeGoodRowComponent,
     CargoItemRowComponent,
+    PostcardDialogComponent,
   ],
 
   templateUrl: './system-map.component.html',
@@ -200,6 +212,8 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
   private readonly logbook = inject(LogbookStore);
 
+  private readonly flightRecorder = inject(FlightRecorderStore);
+
   private readonly route = inject(ActivatedRoute);
 
   private readonly router = inject(Router);
@@ -208,9 +222,13 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
   private readonly snackbar = inject(SnackbarService);
 
+  private readonly radio = inject(RadioService);
+
   private readonly dialog = inject(DialogService);
 
   private readonly discovery = inject(DiscoveryStore);
+
+  private readonly progression = inject(ProgressionService);
 
   private readonly travelExecutor = inject(TravelExecutorService);
 
@@ -342,6 +360,8 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly contractWaypoints = signal<Set<string>>(new Set<string>());
 
+  readonly postcardOptions = signal<PostcardOptions | null>(null);
+
   readonly transitTick = signal(0);
 
   readonly marketSearchResults = computed(() =>
@@ -445,6 +465,8 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly cockpitTab = signal<CockpitTab>('nav');
   readonly logLines = signal<CockpitLogLine[]>([]);
   readonly actionPulse = signal(0);
+  /** Active black-box replay voyage passed to the flight view (null = none). */
+  readonly replayVoyage = signal<Voyage | null>(null);
   private logSeq = 0;
 
   readonly cockpitTabs: ReadonlyArray<{ id: CockpitTab; label: string }> = [
@@ -538,12 +560,37 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
     const travelTo = this.route.snapshot.queryParamMap.get('travelTo');
 
+    const replayId = this.route.snapshot.queryParamMap.get('replay');
+
     void this.loadSystem(name, tryFallback).then(() => {
 
       if (travelTo) void this.openTravelFromQuery(travelTo);
 
+      if (replayId) this.startReplayFromQuery(replayId);
+
     });
 
+  }
+
+  private startReplayFromQuery(idStr: string): void {
+    const id = Number(idStr);
+    if (!Number.isFinite(id)) return;
+    const voyage = this.flightRecorder.voyages().find((v) => v.id === id);
+    if (!voyage) {
+      this.snackbar.show('Recorded voyage not found.', 'warning');
+      return;
+    }
+    this.viewMode.set('flight');
+    this.replayVoyage.set(voyage);
+  }
+
+  onReplayExit(): void {
+    this.replayVoyage.set(null);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { replay: null },
+      queryParamsHandling: 'merge',
+    });
   }
 
   private async openTravelFromQuery(travelTo: string): Promise<void> {
@@ -584,6 +631,62 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
   }
 
+  async shareSpectatorLink(): Promise<void> {
+    const planets = this.planets();
+    if (!planets.length) {
+      this.snackbar.show('Load a system before sharing a spectator link.', 'warning');
+      return;
+    }
+    const agent = this.agentStore.agent();
+    const snapshot = buildSnapshot({
+      systemSymbol: this.systemSymbol(),
+      systemName: this.systemData()?.name ?? this.systemSymbol(),
+      planets,
+      ships: this.ships(),
+      captain: { name: agent?.name ?? 'Anonymous captain', faction: agent?.faction ?? '' },
+    });
+    try {
+      const { payload, droppedShips } = await encodeSnapshotWithGuard(snapshot);
+      const url = `${location.origin}/spectate#s=${payload}`;
+      const result = await shareOrCopyUrl(url, `Spectate ${snapshot.systemName}`);
+      if (result === 'failed') {
+        this.snackbar.show('Could not create the spectator link.', 'error');
+      } else if (result === 'copied') {
+        this.snackbar.show(
+          droppedShips
+            ? 'Spectator link copied (fleet omitted — system too large).'
+            : 'Spectator link copied to clipboard.',
+          'success',
+        );
+      }
+    } catch {
+      this.snackbar.show('Could not create the spectator link.', 'error');
+    }
+  }
+
+  openPostcard(): void {
+    if (!this.planets().length) {
+      this.snackbar.show('Load a system before making a postcard.', 'warning');
+      return;
+    }
+    const agent = this.agentStore.agent();
+    this.postcardOptions.set({
+      systemSymbol: this.systemSymbol(),
+      systemName: this.systemData()?.name ?? this.systemSymbol(),
+      planets: this.planets(),
+      highlightWaypoint: this.selectedPlanet()?.name ?? null,
+      captain: {
+        name: agent?.name ?? 'Anonymous captain',
+        faction: agent?.faction ?? '',
+        credits: agent?.credits,
+      },
+    });
+  }
+
+  closePostcard(): void {
+    this.postcardOptions.set(null);
+  }
+
 
 
   async selectPlanet(planet: PlanetView, options?: { keepShip?: boolean }): Promise<void> {
@@ -593,6 +696,7 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!options?.keepShip) {
 
       this.fleetStore.selectShip(null);
+      this.focusShipSymbol.set(null);
 
     }
 
@@ -1265,6 +1369,12 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
       const data = await this.api.getMarket(planet.system, planet.name);
 
       this.market.set(data);
+      this.progression.markGoodsSeen([
+        ...data.exports.map((g) => g.symbol),
+        ...data.imports.map((g) => g.symbol),
+        ...data.exchange.map((g) => g.symbol),
+        ...(data.tradeGoods ?? []).map((g) => g.symbol),
+      ]);
 
       this.detailPanel.set('market');
 
@@ -1476,7 +1586,16 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
       async () => {
 
-        await this.api.navigateShip(shipSymbol, planet.name);
+        const navBefore = this.ships().find((s) => s.symbol === shipSymbol);
+        const navRes = await this.api.navigateShip(shipSymbol, planet.name);
+        this.progression.recordNavigate({
+          ship: shipSymbol,
+          origin: navBefore?.nav.waypointSymbol,
+          destination: planet.name,
+          system: navRes.data.nav.systemSymbol,
+          destinationType: navRes.data.nav.route?.destination?.type ?? planet.type,
+          fuelConsumed: navRes.data.fuel?.consumed?.amount,
+        });
 
       },
 
@@ -1500,7 +1619,16 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
       async () => {
 
-        await this.api.warpShip(shipSymbol, planet.name);
+        const warpBefore = this.ships().find((s) => s.symbol === shipSymbol);
+        const warpRes = await this.api.warpShip(shipSymbol, planet.name);
+        this.progression.recordNavigate({
+          ship: shipSymbol,
+          origin: warpBefore?.nav.waypointSymbol,
+          destination: planet.name,
+          system: warpRes.data.nav.systemSymbol,
+          destinationType: warpRes.data.nav.route?.destination?.type ?? planet.type,
+          fuelConsumed: warpRes.data.fuel?.consumed?.amount,
+        });
 
       },
 
@@ -1582,7 +1710,16 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
       async () => {
 
-        await this.api.jumpShip(shipSymbol, target);
+        const jumpBefore = this.ships().find((s) => s.symbol === shipSymbol);
+        const jumpRes = await this.api.jumpShip(shipSymbol, target);
+        this.progression.recordNavigate({
+          ship: shipSymbol,
+          origin: jumpBefore?.nav.waypointSymbol,
+          destination: target,
+          system: jumpRes.data.nav.systemSymbol,
+          destinationType: jumpRes.data.nav.route?.destination?.type,
+          fuelConsumed: jumpRes.data.fuel?.consumed?.amount,
+        });
 
       },
 
@@ -1621,6 +1758,13 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
         const tx = res.data.transaction;
 
         this.logbook.recordRefuel(ship, tx?.units ?? null, tx?.totalPrice ?? null, waypoint);
+        this.progression.recordRefuel({
+          ship,
+          units: tx?.units ?? null,
+          totalPrice: tx?.totalPrice ?? null,
+          waypoint,
+          credits: res.data.agent?.credits,
+        });
 
       },
 
@@ -1844,6 +1988,15 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
         const tx = res.data.transaction;
 
         this.logbook.recordTrade(mode, ship, tx?.units ?? units, tx?.tradeSymbol ?? symbol, tx?.totalPrice ?? null, waypoint);
+        this.progression.recordTrade({
+          mode,
+          ship,
+          units: tx?.units ?? units,
+          good: tx?.tradeSymbol ?? symbol,
+          totalPrice: tx?.totalPrice ?? null,
+          waypoint,
+          credits: res.data.agent?.credits,
+        });
 
       },
 
@@ -2395,11 +2548,25 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
       const response = await this.api.scanShips(shipSymbol);
 
-      this.shipScanResults.set(response.data.ships ?? []);
+      const scanned = response.data.ships ?? [];
+
+      this.shipScanResults.set(scanned);
 
       this.scanResults.set(null);
 
       this.detailPanel.set('scan');
+
+      const mine = new Set(this.ships().map((s) => s.symbol));
+
+      const contacts = scanned.filter((s) => {
+        const sym = (s as { symbol?: string }).symbol;
+        return !sym || !mine.has(sym);
+      });
+
+      if (contacts.length) {
+        const wp = this.ships().find((s) => s.symbol === shipSymbol)?.nav.waypointSymbol;
+        this.radio.announcePirate(contacts.length, wp);
+      }
 
       this.snackbar.show('Ship scan complete', 'success');
 
@@ -2471,6 +2638,7 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
   closeTerminal(): void {
     this.fleetStore.selectShip(null);
+    this.focusShipSymbol.set(null);
     this.selectedPlanet.set(null);
     this.clearDetailData();
   }
@@ -2622,7 +2790,7 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
       // Ships load asynchronously after the waypoints, so re-run the default
       // focus once the fleet is available to avoid spawning at the system star.
 
-      if (this.planets().length) {
+      if (this.planets().length && !this.selectedShip()) {
 
         this.applyBeginnerDefaults();
 

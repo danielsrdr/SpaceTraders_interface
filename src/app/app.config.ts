@@ -18,6 +18,9 @@ function initializeApp() {
   const auth = inject(AuthService);
   const router = inject(Router);
   return async () => {
+    // Public read-only spectator links must work without a token and without
+    // bouncing to /register, so skip relog + the auth redirect entirely.
+    if (location.pathname.startsWith('/spectate')) return;
     const relogged = await auth.relog();
     const path = router.url;
     if (!relogged && !path.startsWith('/login') && !path.startsWith('/register')) {

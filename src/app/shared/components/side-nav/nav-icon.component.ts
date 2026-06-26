@@ -11,6 +11,8 @@ export type NavIconName =
   | 'data'
   | 'api'
   | 'autopilot'
+  | 'dashboard'
+  | 'codex'
   | 'logout'
   | 'locked';
 
@@ -87,6 +89,16 @@ export type NavIconName =
           <circle cx="12" cy="12" r="8.2" />
           <circle cx="12" cy="12" r="2" />
           <path d="M12 3.8v3M12 17.2v3M3.8 12h3M17.2 12h3" />
+        }
+        @case ('dashboard') {
+          <path d="M4 20h16" />
+          <path d="M7 20v-5" />
+          <path d="M12 20V9" />
+          <path d="M17 20v-8" />
+        }
+        @case ('codex') {
+          <path d="M12 6.5C10.5 5 8 4.5 5 4.8V18c3-.3 5.5.2 7 1.7 1.5-1.5 4-2 7-1.7V4.8c-3-.3-5.5.2-7 1.7Z" />
+          <path d="M12 6.5V20" />
         }
         @case ('logout') {
           <path d="M12.5 4H5.5C4.7 4 4 4.7 4 5.5v13c0 .8.7 1.5 1.5 1.5h7" />

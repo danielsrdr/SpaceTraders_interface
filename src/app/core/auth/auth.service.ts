@@ -2,6 +2,7 @@ import { inject, Injectable } from '@angular/core';
 import { Router } from '@angular/router';
 import { AgentStore } from '../state/agent.store';
 import { LogbookStore } from '../state/logbook.store';
+import { FlightRecorderStore } from '../state/flight-recorder.store';
 import { SpaceTradersApiService } from '../../services/spacetraders-api.service';
 import { TokenStorageService } from '../../services/token-storage.service';
 
@@ -11,6 +12,7 @@ export class AuthService {
   private readonly tokenStorage = inject(TokenStorageService);
   private readonly agentStore = inject(AgentStore);
   private readonly logbook = inject(LogbookStore);
+  private readonly flightRecorder = inject(FlightRecorderStore);
   private readonly router = inject(Router);
 
   hasStoredToken(): boolean {
@@ -23,6 +25,7 @@ export class AuthService {
       const agent = await this.api.getAgent();
       this.agentStore.setAgent(agent);
       void this.logbook.attach(agent.name);
+      this.flightRecorder.attach(agent.name);
       return true;
     } catch {
       this.tokenStorage.clearToken();
@@ -40,6 +43,7 @@ export class AuthService {
       const agent = await this.api.getAgent();
       this.agentStore.setAgent(agent);
       void this.logbook.attach(agent.name);
+      this.flightRecorder.attach(agent.name);
       return [];
     } catch {
       this.tokenStorage.clearToken();
@@ -61,6 +65,7 @@ export class AuthService {
       this.tokenStorage.setToken(agent.token, remember);
       this.agentStore.setAgent(agent);
       void this.logbook.attach(agent.name);
+      this.flightRecorder.attach(agent.name);
       return [];
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Registration failed.';
@@ -73,6 +78,7 @@ export class AuthService {
     this.api.clearCaches();
     this.agentStore.clear();
     this.logbook.detach();
+    this.flightRecorder.detach();
     void this.router.navigate(['/login']);
   }
 

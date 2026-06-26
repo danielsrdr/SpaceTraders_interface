@@ -8,7 +8,7 @@ import {
 } from 'three';
 import { ShipData } from '../../../models/ship.model';
 import { buildProceduralShip, disposeShip } from '../../ships/ship-procedural.builder';
-import { getTransitProgress, shipInTransit, shipOrbitOffset } from '../planet-helpers';
+import { getStableTransitProgress, shipInTransit, shipOrbitOffset } from '../planet-helpers';
 import { orientAlongArc, sampleTransitArc } from './transit-arc.math';
 import { shipMarkerScale, shipOrbitDistance } from './system-scene.layout';
 import { SystemOrbitEngine } from './system-orbit.engine';
@@ -137,6 +137,7 @@ export class ShipMarkerManager {
   applyPositions(
     orbitEngine: SystemOrbitEngine,
     planetByName: ReadonlyMap<string, MarkerPlanetEntry>,
+    fleetBySymbol: ReadonlyMap<string, ShipData>,
   ): void {
     const originPos = this.originScratch;
     const destPos = this.destScratch;
@@ -160,13 +161,14 @@ export class ShipMarkerManager {
         continue;
       }
 
-      const route = data.ship.nav.route;
+      const ship = fleetBySymbol.get(data.ship.symbol) ?? data.ship;
+      const route = ship.nav.route;
       if (!route) continue;
       const originEntry = planetByName.get(data.originSymbol);
       const destEntry = planetByName.get(data.destSymbol);
       if (!originEntry || !destEntry) continue;
 
-      const t = getTransitProgress(route);
+      const t = getStableTransitProgress(ship);
       orbitEngine.getWorldPosition(data.originSymbol, originPos);
       orbitEngine.getWorldPosition(data.destSymbol, destPos);
       sampleTransitArc(originPos, destPos, t, child.position);
@@ -264,9 +266,12 @@ export function computeMarkerSignature(
   const parts = onMap
     .map((s) => {
       const route = s.nav.route;
-      const leg =
-        shipInTransit(s) && route ? `${route.origin.symbol}>${route.destination.symbol}` : '';
-      return `${s.symbol}|${s.registration.role}|${s.nav.status}|${s.nav.waypointSymbol}|${leg}`;
+      // In transit, waypointSymbol can flicker between polls; the route leg is enough.
+      const loc =
+        shipInTransit(s) && route
+          ? `${route.origin.symbol}>${route.destination.symbol}`
+          : s.nav.waypointSymbol;
+      return `${s.symbol}|${s.registration.role}|${s.nav.status}|${loc}`;
     })
     .sort();
   return `${systemSymbol}#${selected ?? ''}#${parts.join(',')}`;

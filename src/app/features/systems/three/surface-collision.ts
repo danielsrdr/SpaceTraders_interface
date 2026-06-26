@@ -1,17 +1,35 @@
 import { InstancedMesh, Mesh, Object3D } from 'three';
 import { TerrainHeightField, WORLD_RADIUS } from './terrain/terrain-height';
 import { MineTunnelManager } from './mine/mine-tunnel.manager';
+import type { SurfaceColliderRegistry } from './surface-collider-registry';
 
 const PLAYER_RADIUS = 0.35;
 
 export interface SurfaceCollision {
   getGroundHeight(x: number, z: number): number;
   isSolid(x: number, y: number, z: number): boolean;
+  /**
+   * True when a vertical capsule body (`lowerY`..`upperY`) of `radius` at
+   * `(x, z)` hits a registered collider. Callers pass `lowerY = feet + step`
+   * so low, steppable obstacles do not block.
+   */
+  blocksCapsuleBody(
+    x: number,
+    z: number,
+    radius: number,
+    lowerY: number,
+    upperY: number,
+  ): boolean;
+  /** Highest collider top no higher than `maxTopY` to stand on / step onto. */
+  supportHeight(x: number, z: number, radius: number, maxTopY: number): number;
+  /** Lowest collider base above `aboveY` to clamp the head against. */
+  ceilingHeight(x: number, z: number, radius: number, aboveY: number): number;
 }
 
 export function createSurfaceCollision(
   heightField: TerrainHeightField,
   tunnels: MineTunnelManager | null,
+  colliders: SurfaceColliderRegistry | null = null,
 ): SurfaceCollision {
   return {
     getGroundHeight(x: number, z: number): number {
@@ -35,6 +53,24 @@ export function createSurfaceCollision(
       }
 
       return false;
+    },
+
+    blocksCapsuleBody(
+      x: number,
+      z: number,
+      radius: number,
+      lowerY: number,
+      upperY: number,
+    ): boolean {
+      return colliders ? colliders.blocksBody(x, z, radius, lowerY, upperY) : false;
+    },
+
+    supportHeight(x: number, z: number, radius: number, maxTopY: number): number {
+      return colliders ? colliders.maxSupportTop(x, z, radius, maxTopY) : -Infinity;
+    },
+
+    ceilingHeight(x: number, z: number, radius: number, aboveY: number): number {
+      return colliders ? colliders.minCeilingBase(x, z, radius, aboveY) : Infinity;
     },
   };
 }

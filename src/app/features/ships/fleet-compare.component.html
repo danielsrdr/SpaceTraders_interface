@@ -2,8 +2,8 @@
   <div class="sk-page-center"><p class="text-sm text-white/75">No ships to compare.</p></div>
 } @else {
   <div class="mx-auto flex h-full w-full max-w-6xl flex-col gap-4 overflow-y-auto px-4 pt-20 pb-6 text-white">
-    <div class="grid gap-4 md:grid-cols-2">
-      <div class="flex flex-col items-center">
+    <div class="flex flex-col gap-3 md:flex-row md:items-stretch">
+      <div class="flex flex-1 flex-col items-center">
         <select
           class="sk-select w-full max-w-xs"
           [ngModel]="aShip()?.symbol ?? ''"
@@ -14,13 +14,33 @@
           }
         </select>
         @if (aShip(); as ship) {
-          <app-ship-viewer-3d class="mt-2 block h-[min(38vh,320px)] w-full" [ship]="ship" />
-          <p class="mt-1 text-center text-xs text-white/70">
+          <app-ship-viewer-3d
+            class="mt-2 block h-[min(38vh,320px)] w-full"
+            [ship]="ship"
+            [autoSpin]="true"
+          />
+          <p
+            class="mt-1 text-center text-xs"
+            [class.text-cyan-300]="winner() === 'a'"
+            [class.font-semibold]="winner() === 'a'"
+            [class.opacity-70]="winner() !== 'a'"
+          >
             {{ ship.registration.name }} · {{ ship.registration.role }}
           </p>
         }
       </div>
-      <div class="flex flex-col items-center">
+
+      <div class="flex items-center justify-center py-1 md:py-0">
+        <span
+          class="sk-duel-vs"
+          [class.sk-duel-vs--a]="winner() === 'a'"
+          [class.sk-duel-vs--b]="winner() === 'b'"
+        >
+          VS
+        </span>
+      </div>
+
+      <div class="flex flex-1 flex-col items-center">
         <select
           class="sk-select w-full max-w-xs"
           [ngModel]="bShip()?.symbol ?? ''"
@@ -31,13 +51,34 @@
           }
         </select>
         @if (bShip(); as ship) {
-          <app-ship-viewer-3d class="mt-2 block h-[min(38vh,320px)] w-full" [ship]="ship" />
-          <p class="mt-1 text-center text-xs text-white/70">
+          <app-ship-viewer-3d
+            class="mt-2 block h-[min(38vh,320px)] w-full"
+            [ship]="ship"
+            [autoSpin]="true"
+          />
+          <p
+            class="mt-1 text-center text-xs"
+            [class.text-cyan-300]="winner() === 'b'"
+            [class.font-semibold]="winner() === 'b'"
+            [class.opacity-70]="winner() !== 'b'"
+          >
             {{ ship.registration.name }} · {{ ship.registration.role }}
           </p>
         }
       </div>
     </div>
+
+    @if (rows().length) {
+      <div class="sk-panel flex items-center justify-center gap-2 text-sm">
+        @if (winnerShip(); as w) {
+          <span class="text-white/70">Duel winner</span>
+          <span class="font-bold text-cyan-300">{{ w.registration.name }}</span>
+          <span class="text-white/50">({{ w.symbol }})</span>
+        } @else {
+          <span class="text-white/70">Evenly matched — it's a tie</span>
+        }
+      </div>
+    }
 
     @if (recommendation(); as rec) {
       <div class="sk-panel flex flex-col gap-1 text-sm">
@@ -65,11 +106,19 @@
             </span>
           </div>
           <div class="flex items-center gap-2">
-            <div class="sk-gauge flex-1">
-              <div class="sk-gauge-fill" [style.width.%]="barPercent(row.aValue, row)"></div>
+            <div class="sk-gauge sk-gauge--rtl flex-1">
+              <div
+                class="sk-gauge-fill"
+                [class.sk-gauge-fill--win]="row.winner === 'a'"
+                [style.width.%]="barsArmed() ? barPercent(row.aValue, row) : 0"
+              ></div>
             </div>
             <div class="sk-gauge flex-1">
-              <div class="sk-gauge-fill" [style.width.%]="barPercent(row.bValue, row)"></div>
+              <div
+                class="sk-gauge-fill"
+                [class.sk-gauge-fill--win]="row.winner === 'b'"
+                [style.width.%]="barsArmed() ? barPercent(row.bValue, row) : 0"
+              ></div>
             </div>
           </div>
         </div>

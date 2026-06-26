@@ -1,7 +1,7 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { ShipData } from '../../models/ship.model';
 import { SpaceTradersApiService } from '../../services/spacetraders-api.service';
-import { shipInSystem, shipsOnMap } from '../../features/systems/planet-helpers';
+import { shipInSystem, shipsOnMap, evictStableTransitProgressOnRefresh } from '../../features/systems/planet-helpers';
 
 @Injectable({ providedIn: 'root' })
 export class FleetStore {
@@ -50,7 +50,9 @@ export class FleetStore {
 
   async refreshShips(): Promise<ShipData[]> {
     try {
+      const prev = this.ships();
       const list = await this.api.getAllShips();
+      evictStableTransitProgressOnRefresh(prev, list);
       this.ships.set(list);
       const selected = this.selectedShipSymbol();
       if (selected && !list.some((s) => s.symbol === selected)) {

@@ -44,6 +44,7 @@ export class SideNavComponent {
     const contractExpiring = this.activity.contractExpiringAlert();
     return [
       { id: 'home', label: 'Home', icon: 'home', route: '/home', locked: false, activity: false },
+      { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', route: '/dashboard', locked: false, activity: false },
       { id: 'systems', label: 'Systems', icon: 'systems', route: '/systems', locked: false, activity: false },
       {
         id: 'ships',
@@ -72,6 +73,14 @@ export class SideNavComponent {
         locked: factionsLocked,
         activity: false,
         unlockHint: 'Accept your first contract to unlock Factions.',
+      },
+      {
+        id: 'codex',
+        label: 'Codex',
+        icon: 'codex',
+        route: '/codex',
+        locked: false,
+        activity: false,
       },
       { id: 'leaderboard', label: 'Leaderboard', icon: 'leaderboard', route: '/leaderboard', locked: false, activity: false },
       { id: 'profile', label: 'Profile', icon: 'profile', route: '/profile', locked: false, activity: false },

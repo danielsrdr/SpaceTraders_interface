@@ -15,6 +15,10 @@ import { buildSurfaceProps } from './surface-props.builder';
 import { buildSurfacePoiConfig } from './surface-poi';
 import { buildProceduralSurfaceZones, SurfaceZone } from './surface-zones';
 import { createSurfaceCollision, SurfaceCollision } from './surface-collision';
+import {
+  createSurfaceColliderRegistry,
+  SurfaceColliderRegistry,
+} from './surface-collider-registry';
 import { buildMarketStructuresAt, MarketStallAnchor } from './zone-buildings.builder';
 import { createTerrainHeightField, TerrainHeightField } from './terrain/terrain-height';
 import { createTerrainChunkManager, TerrainChunkManager } from './terrain/terrain-chunk.manager';
@@ -37,6 +41,7 @@ export interface SurfaceWorldResult {
   terrainManager: TerrainChunkManager;
   tunnels: MineTunnelManager | null;
   collision: SurfaceCollision;
+  colliders: SurfaceColliderRegistry;
   zones: SurfaceZone[];
   poiAnchors: SurfacePoiAnchor[];
   marketStalls: MarketStallAnchor[];
@@ -89,7 +94,8 @@ export function buildSurfaceWorld(
   const heightField = createTerrainHeightField(poiConfig);
   const terrainManager = createTerrainChunkManager(heightField, poiConfig);
   const tunnels = createMineTunnelManager(heightField.getPitConfig(), poiConfig.seed);
-  const collision = createSurfaceCollision(heightField, tunnels);
+  const colliders = createSurfaceColliderRegistry();
+  const collision = createSurfaceCollision(heightField, tunnels, colliders);
   const spawn = heightField.getSpawn();
   const zones = buildProceduralSurfaceZones(poiConfig.hasMarket, poiConfig.hasMine, poiConfig.poi);
 
@@ -114,6 +120,7 @@ export function buildSurfaceWorld(
     const built = buildMarketStructuresAt(x, z, baseY, market);
     root.add(built.group);
     marketStalls = built.stalls;
+    built.colliders.forEach((c) => colliders.add(c, 'market'));
     marketOrigin = { x, z, baseY };
     root.add(buildPoiBeacon(x + 5, z + 5, baseY, POI_BEACON_COLORS.market));
     poiAnchors.push({ kind: 'market', label: 'Market', position: new Vector3(x + 5, baseY + 7, z + 5) });
@@ -130,7 +137,9 @@ export function buildSurfaceWorld(
     });
   }
 
-  root.add(buildSurfaceProps(heightField, poiConfig.seed));
+  const props = buildSurfaceProps(heightField, poiConfig.seed);
+  root.add(props.group);
+  props.colliders.forEach((c) => colliders.add(c, 'static'));
 
   terrainManager.update(spawn.x, spawn.z);
 
@@ -140,6 +149,7 @@ export function buildSurfaceWorld(
     terrainManager,
     tunnels,
     collision,
+    colliders,
     zones,
     poiAnchors,
     marketStalls,

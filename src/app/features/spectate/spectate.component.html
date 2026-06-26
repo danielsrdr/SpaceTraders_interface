@@ -1,0 +1,40 @@
+@if (loading()) {
+  <div class="sk-page-center">
+    <p class="text-sm tracking-widest text-white/75 uppercase">Decoding spectator replay…</p>
+  </div>
+} @else if (error(); as message) {
+  <div class="sk-page-center flex-col gap-4 px-6 text-center">
+    <h1 class="font-display text-2xl tracking-widest text-sky-300/90 uppercase">Spectator</h1>
+    <p class="max-w-md text-sm text-white/80">{{ message }}</p>
+    <button type="button" class="sk-btn" (click)="goRegister()">Create your own agent</button>
+  </div>
+} @else {
+  <div class="relative h-screen w-full">
+    <app-system-flight-view
+      class="block h-full w-full"
+      [planets]="planets()"
+      [ships]="ships()"
+      [systemSymbol]="systemSymbol()"
+      [systemName]="systemName()"
+      [selectedShipSymbol]="heroShipSymbol()"
+      [selectedShipRole]="heroShipRole()"
+    />
+
+    <div class="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center p-3">
+      <div
+        class="pointer-events-auto flex items-center gap-3 rounded-full border border-cyan-500/40 bg-slate-950/85 px-4 py-2 text-xs text-white shadow-lg backdrop-blur"
+      >
+        <span class="inline-flex h-2 w-2 shrink-0 rounded-full bg-cyan-400"></span>
+        <span class="tracking-wide">
+          Spectating <span class="text-cyan-300">{{ captainName() }}</span>
+          @if (captainFaction()) {
+            · <span class="text-amber-300">{{ captainFaction() }}</span>
+          }
+          in <span class="text-cyan-300">{{ systemName() || systemSymbol() }}</span>
+          <span class="text-white/50">· read-only replay</span>
+        </span>
+        <button type="button" class="sk-btn px-2 py-1 text-[11px]" (click)="goRegister()">Play</button>
+      </div>
+    </div>
+  </div>
+}

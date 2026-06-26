@@ -13,6 +13,11 @@ import { SupplyChainComponent } from './features/data/supply-chain.component';
 
 export const routes: Routes = [
   {
+    path: 'spectate',
+    loadComponent: () =>
+      import('./features/spectate/spectate.component').then((m) => m.SpectateComponent),
+  },
+  {
     path: '',
     component: AppShellComponent,
     children: [
@@ -20,6 +25,17 @@ export const routes: Routes = [
       { path: 'login', component: LoginComponent, canActivate: [guestGuard] },
       { path: 'register', component: RegisterComponent, canActivate: [guestGuard] },
       { path: 'home', component: HomeComponent, canActivate: [authGuard] },
+      {
+        path: 'dashboard',
+        loadComponent: () =>
+          import('./features/dashboard/dashboard.component').then((m) => m.DashboardComponent),
+        canActivate: [authGuard],
+      },
+      {
+        path: 'codex',
+        loadComponent: () => import('./features/codex/codex.component').then((m) => m.CodexComponent),
+        canActivate: [authGuard],
+      },
       { path: 'profile', component: ProfileComponent, canActivate: [authGuard] },
       { path: 'leaderboard', component: LeaderboardComponent, canActivate: [authGuard] },
       { path: 'contracts', component: ContractsComponent, canActivate: [authGuard] },

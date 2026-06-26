@@ -9,6 +9,36 @@
     }
   </header>
 
+  @if (voyages().length) {
+    <div class="sk-panel">
+      <div class="mb-2 flex items-center justify-between gap-2">
+        <h2 class="m-0 font-display text-sm tracking-[0.25em] text-violet-200 uppercase">
+          Black box · {{ voyages().length }} voyages
+        </h2>
+        <button type="button" class="sk-btn px-2 py-0.5 text-[10px]" (click)="clearVoyages()">
+          Clear
+        </button>
+      </div>
+      <div class="flex max-h-48 flex-col gap-1 overflow-y-auto">
+        @for (voyage of voyages(); track voyage.id) {
+          <div class="flex items-center gap-2 border-b border-white/10 py-1.5 last:border-0">
+            <div class="min-w-0 flex-1">
+              <p class="m-0 truncate text-sm text-white/90">
+                {{ voyage.originSymbol }} → {{ voyage.destinationSymbol }}
+              </p>
+              <p class="m-0 text-[11px] text-white/45">
+                {{ voyage.ship }} · {{ formatVoyageDuration(voyage) }} · {{ formatVoyageDate(voyage) }}
+              </p>
+            </div>
+            <button type="button" class="sk-btn px-3 py-1 text-xs" (click)="replay(voyage)">
+              Replay
+            </button>
+          </div>
+        }
+      </div>
+    </div>
+  }
+
   <div class="sk-panel flex-1 overflow-y-auto">
     @for (entry of entriesReversed(); track entry.id) {
       <div class="flex flex-col gap-0.5 border-b border-white/10 py-2 last:border-0">

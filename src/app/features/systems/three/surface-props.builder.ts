@@ -15,6 +15,15 @@ import {
 } from 'three';
 import { noise2d } from './terrain/terrain-noise';
 import { TerrainHeightField } from './terrain/terrain-height';
+import type { SurfaceCollider } from './surface-collider-registry';
+
+/** Props near the spawn point are left collider-free so the player never starts stuck. */
+const SPAWN_CLEAR_RADIUS = 3;
+
+export interface SurfacePropsResult {
+  group: Group;
+  colliders: SurfaceCollider[];
+}
 
 export function buildSkydome(): Mesh {
   const geometry = new BufferGeometry();
@@ -62,9 +71,10 @@ export function buildSkydome(): Mesh {
   return mesh;
 }
 
-export function buildSurfaceProps(heightField: TerrainHeightField, seed: number): Group {
+export function buildSurfaceProps(heightField: TerrainHeightField, seed: number): SurfacePropsResult {
   const group = new Group();
   group.name = 'surface-props';
+  const colliders: SurfaceCollider[] = [];
 
   const trunkMat = new MeshStandardMaterial({ color: 0x78350f, flatShading: true });
   const leafMat = new MeshStandardMaterial({ color: 0x166534, flatShading: true });
@@ -105,6 +115,13 @@ export function buildSurfaceProps(heightField: TerrainHeightField, seed: number)
       }
       matrix.makeTranslation(x + 0.5, h + 3.5, z + 0.5);
       leafMesh.setMatrixAt(i, matrix);
+
+      const cx = x + 0.5;
+      const cz = z + 0.5;
+      if (Math.hypot(cx, cz) > SPAWN_CLEAR_RADIUS) {
+        // Trunk only (canopy excluded so the player does not snag on leaves).
+        colliders.push({ kind: 'cylinder', x: cx, z: cz, radius: 0.3, baseY: h, topY: h + 3 });
+      }
     });
     trunkMesh.instanceMatrix.needsUpdate = true;
     leafMesh.instanceMatrix.needsUpdate = true;
@@ -124,11 +141,26 @@ export function buildSurfaceProps(heightField: TerrainHeightField, seed: number)
       pos.set(x + 0.5, h + s * 0.35, z + 0.5);
       matrix.compose(pos, quat, scale);
       rockMesh.setMatrixAt(i, matrix);
+
+      const cx = x + 0.5;
+      const cz = z + 0.5;
+      if (Math.hypot(cx, cz) > SPAWN_CLEAR_RADIUS) {
+        const half = s * 0.5;
+        colliders.push({
+          kind: 'box',
+          minX: cx - half,
+          maxX: cx + half,
+          minZ: cz - half,
+          maxZ: cz + half,
+          baseY: h,
+          topY: h + s * 0.7,
+        });
+      }
     });
     rockMesh.instanceMatrix.needsUpdate = true;
     rockMesh.castShadow = true;
     group.add(rockMesh);
   }
 
-  return group;
+  return { group, colliders };
 }

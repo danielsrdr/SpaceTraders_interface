@@ -19,6 +19,7 @@ import {
   tradeTypeColor,
   volumeToIntensity,
 } from '../trade-good-visuals';
+import type { SurfaceCollider } from './surface-collider-registry';
 
 export interface MarketStallAnchor {
   symbol: string;
@@ -29,7 +30,15 @@ export interface MarketStallAnchor {
 export interface MarketBuildResult {
   group: Group;
   stalls: MarketStallAnchor[];
+  colliders: SurfaceCollider[];
 }
+
+// Stall counter footprint (BoxGeometry 2.4 x 1 x 1.4) sitting on the 0.35-high
+// platform, padded slightly to cover legs and crates.
+const STALL_HALF_X = 1.3;
+const STALL_HALF_Z = 0.9;
+const STALL_BASE_Y = 0.35;
+const STALL_TOP_Y = 1.35;
 
 interface StallGood {
   symbol: string;
@@ -126,6 +135,8 @@ function buildStall(local: Vector3, good: StallGood): Group {
   });
   const sign = new Mesh(new BoxGeometry(2.4, signHeight, 0.18), signMat);
   sign.position.set(0, 1 + signHeight / 2 + 0.6, -0.6);
+  // Tagged so the surface day/night cycle can boost the glow after dusk.
+  sign.userData['nightGlow'] = signMat.emissiveIntensity;
   stall.add(sign);
 
   const post = new MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 });
@@ -149,6 +160,8 @@ function buildStall(local: Vector3, good: StallGood): Group {
 
   const light = new PointLight(typeColor, 0.6 + intensity * 2.2, 8);
   light.position.set(0, 2.6, 0.4);
+  // Tagged so the surface day/night cycle ramps the stall lamps on after dusk.
+  light.userData['nightLight'] = light.intensity;
   stall.add(light);
 
   const priceSprite = makePriceSprite(good);
@@ -186,6 +199,7 @@ function marketGroup(
   group.add(platform);
 
   const stalls: MarketStallAnchor[] = [];
+  const colliders: SurfaceCollider[] = [];
 
   goods.forEach((good, index) => {
     const col = index % cols;
@@ -199,15 +213,27 @@ function marketGroup(
       type: good.type,
       position: new Vector3(originX + localX, groundY + 1, originZ + localZ),
     });
+    const worldX = originX + localX;
+    const worldZ = originZ + localZ;
+    colliders.push({
+      kind: 'box',
+      minX: worldX - STALL_HALF_X,
+      maxX: worldX + STALL_HALF_X,
+      minZ: worldZ - STALL_HALF_Z,
+      maxZ: worldZ + STALL_HALF_Z,
+      baseY: groundY + STALL_BASE_Y,
+      topY: groundY + STALL_TOP_Y,
+    });
   });
 
   if (!goods.length) {
     const beacon = new PointLight(0x22d3ee, 1.5, 16);
     beacon.position.set(width / 2, 3, depth / 2);
+    beacon.userData['nightLight'] = beacon.intensity;
     group.add(beacon);
   }
 
-  return { group, stalls };
+  return { group, stalls, colliders };
 }
 
 export function buildMarketStructuresAt(
