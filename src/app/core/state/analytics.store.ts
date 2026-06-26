@@ -148,6 +148,93 @@ export function computeTopRoutes(
     .slice(0, Math.max(0, limit));
 }
 
+export interface WindowComparison {
+  current: number;
+  previous: number;
+  deltaPct: number;
+}
+
+/** Compare metric over current window vs immediately preceding window of equal length. */
+export function compareWindow(
+  events: StatEvent[],
+  windowHours: number,
+  metricFn: (events: StatEvent[], hours: number, end: number) => number,
+  now = Date.now(),
+): WindowComparison {
+  const current = metricFn(events, windowHours, now);
+  const previousEnd = now - windowHours * HOUR_MS;
+  const previous = metricFn(events, windowHours, previousEnd);
+  const deltaPct = previous === 0 ? (current === 0 ? 0 : 100) : ((current - previous) / Math.abs(previous)) * 100;
+  return { current, previous, deltaPct };
+}
+
+export interface ShipRevenueStat {
+  ship: string;
+  net: number;
+  sparkline: number[];
+}
+
+/** Net credits per ship with mini sparkline buckets over the window. */
+export function computeRevenueByShip(
+  events: StatEvent[],
+  windowHours: number,
+  bucketCount: number,
+  now = Date.now(),
+): ShipRevenueStat[] {
+  const cutoff = windowHours > 0 ? now - windowHours * HOUR_MS : -Infinity;
+  const ships = new Set<string>();
+  for (const e of events) {
+    if (e.t >= cutoff && e.t <= now) ships.add(e.ship);
+  }
+  const count = Math.max(1, bucketCount);
+  const span = Math.max(1, windowHours) * HOUR_MS;
+  const size = span / count;
+
+  return [...ships]
+    .map((ship) => {
+      const shipEvents = events.filter((e) => e.ship === ship && e.t >= cutoff && e.t <= now);
+      let net = 0;
+      const buckets = Array.from({ length: count }, () => 0);
+      for (const e of shipEvents) {
+        if (e.credits != null) net += e.credits;
+        let idx = Math.floor((e.t - (now - span)) / size);
+        if (idx < 0) idx = 0;
+        if (idx >= count) idx = count - 1;
+        if (e.credits != null) buckets[idx] += e.credits;
+      }
+      return { ship, net, sparkline: buckets };
+    })
+    .sort((a, b) => b.net - a.net);
+}
+
+/** Fuel consumed per time bucket (for sparklines). */
+export function computeFuelBuckets(
+  events: StatEvent[],
+  windowHours: number,
+  bucketCount: number,
+  now = Date.now(),
+): RevenueBucket[] {
+  const count = Math.max(1, bucketCount);
+  const span = Math.max(1, windowHours) * HOUR_MS;
+  const start = now - span;
+  const size = span / count;
+  const buckets: RevenueBucket[] = Array.from({ length: count }, (_, i) => ({
+    start: start + i * size,
+    gross: 0,
+    net: 0,
+  }));
+  const cutoff = windowHours > 0 ? start : -Infinity;
+  for (const e of events) {
+    if (e.kind !== 'navigate' || e.fuel == null || e.t < cutoff || e.t > now) continue;
+    let idx = Math.floor((e.t - start) / size);
+    if (idx < 0) idx = 0;
+    if (idx >= count) idx = count - 1;
+    buckets[idx]!.gross += e.fuel;
+    buckets[idx]!.net += e.fuel;
+  }
+  return buckets;
+}
+
 /**
  * Per-agent rolling ledger of quantitative gameplay events. Powers the fleet
  * analytics dashboard. Persisted to localStorage, capped by count and age so it
@@ -199,6 +286,26 @@ export class AnalyticsStore {
 
   topRoutes(limit: number, windowHours: number, now = Date.now()): RouteStat[] {
     return computeTopRoutes(this.events(), limit, windowHours, now);
+  }
+
+  compareNetCredits(windowHours: number, now = Date.now()): WindowComparison {
+    return compareWindow(this.events(), windowHours, computeNetCredits, now);
+  }
+
+  compareRevenuePerHour(windowHours: number, now = Date.now()): WindowComparison {
+    return compareWindow(this.events(), windowHours, computeRevenuePerHour, now);
+  }
+
+  compareFuelBurned(windowHours: number, now = Date.now()): WindowComparison {
+    return compareWindow(this.events(), windowHours, computeFuelBurned, now);
+  }
+
+  revenueByShip(windowHours: number, bucketCount: number, now = Date.now()): ShipRevenueStat[] {
+    return computeRevenueByShip(this.events(), windowHours, bucketCount, now);
+  }
+
+  fuelBuckets(windowHours: number, bucketCount: number, now = Date.now()): RevenueBucket[] {
+    return computeFuelBuckets(this.events(), windowHours, bucketCount, now);
   }
 
   private prune(list: StatEvent[]): StatEvent[] {

@@ -3,6 +3,7 @@ import { Router } from '@angular/router';
 import { AgentStore } from '../../core/state/agent.store';
 import { FleetStore } from '../../core/state/fleet.store';
 import { DiscoveryStore } from '../../core/state/discovery.store';
+import { OrderQueueStore } from '../../core/state/order-queue.store';
 import { AuthService } from '../../core/auth/auth.service';
 import { getAgentSystem } from '../../models/agent.model';
 import { NavActivityService } from '../services/nav-activity.service';
@@ -10,17 +11,28 @@ import { SnackbarService } from '../services/snackbar.service';
 import { LogbookDrawerService } from '../services/logbook-drawer.service';
 import { NavIconName } from '../components/side-nav/nav-icon.component';
 
+export type NavSection = 'ops' | 'economy' | 'exploration' | 'meta';
+
 export interface NavItemView {
   id: string;
   label: string;
   icon: NavIconName;
   route?: string;
   action?: 'logout' | 'systems' | 'logbook-drawer';
+  section: NavSection;
   locked: boolean;
   activity: boolean;
   activityKind?: 'good' | 'warn';
+  badge?: number;
+  badgeKind?: 'neutral' | 'warn' | 'good';
   unlockHint?: string;
   keywords: string[];
+}
+
+export interface NavSectionGroup {
+  id: NavSection;
+  label: string;
+  items: NavItemView[];
 }
 
 export interface PaletteCommand {
@@ -38,12 +50,20 @@ export interface PaletteCommand {
 const FACTIONS_UNLOCK_HINT = 'Accept your first contract to unlock Factions.';
 const DATA_UNLOCK_HINT = 'Extract resources with a ship to unlock the Data terminal.';
 
+const SECTION_LABELS: Record<NavSection, string> = {
+  ops: 'Ops',
+  economy: 'Économie',
+  exploration: 'Exploration',
+  meta: 'Méta',
+};
+
 @Injectable({ providedIn: 'root' })
 export class NavCommandsService {
   private readonly agentStore = inject(AgentStore);
   private readonly fleetStore = inject(FleetStore);
   private readonly discovery = inject(DiscoveryStore);
   private readonly activity = inject(NavActivityService);
+  private readonly orderQueue = inject(OrderQueueStore);
   private readonly auth = inject(AuthService);
   private readonly snackbar = inject(SnackbarService);
   private readonly logbookDrawer = inject(LogbookDrawerService);
@@ -57,47 +77,47 @@ export class NavCommandsService {
     const factionsLocked = !this.discovery.factionsUnlocked();
     const shipArrived = this.activity.shipArrivedAlert();
     const contractExpiring = this.activity.contractExpiringAlert();
+    const inTransit = this.fleetStore.ships().filter((s) => s.nav.status === 'IN_TRANSIT').length;
+    const openContracts = this.activity
+      .activeContracts()
+      .filter((c) => c.accepted && !c.fulfilled).length;
+    const autopilotActive = this.orderQueue.activeShips().length;
+
     return [
-      this.nav('home', 'Command Center', 'home', '/home', ['start', 'welcome', 'command', 'hub']),
-      this.nav('dashboard', 'Dashboard', 'dashboard', '/dashboard', ['stats', 'overview']),
-      this.nav('systems', 'Systems', 'systems', undefined, ['map', 'flight', 'galaxy'], 'systems'),
-      this.nav('ships', 'Ships', 'ships', '/ships', ['fleet', 'vessels'], undefined, shipArrived, 'good'),
-      this.nav('autopilot', 'Auto-pilot', 'autopilot', '/autopilot', ['automation', 'queue', 'orders']),
-      this.nav('contracts', 'Contracts', 'contracts', '/contracts', ['missions', 'jobs'], undefined, contractExpiring, 'warn'),
+      this.nav('home', 'Command Center', 'home', '/home', 'ops', ['start', 'welcome', 'command', 'hub']),
+      this.nav('dashboard', 'Dashboard', 'dashboard', '/dashboard', 'ops', ['stats', 'overview']),
+      this.nav('systems', 'Systems', 'systems', undefined, 'ops', ['map', 'flight', 'galaxy'], 'systems'),
+      this.nav('ships', 'Ships', 'ships', '/ships', 'ops', ['fleet', 'vessels'], undefined, shipArrived, 'good', inTransit, 'neutral'),
+      this.nav('autopilot', 'Auto-pilot', 'autopilot', '/autopilot', 'ops', ['automation', 'queue', 'orders'], undefined, false, undefined, autopilotActive, 'good'),
+      this.nav('contracts', 'Contracts', 'contracts', '/contracts', 'economy', ['missions', 'jobs'], undefined, contractExpiring, 'warn', openContracts, contractExpiring ? 'warn' : 'neutral'),
       {
-        ...this.nav('factions', 'Factions', 'factions', '/factions', ['diplomacy', 'registry']),
+        ...this.nav('factions', 'Factions', 'factions', '/factions', 'economy', ['diplomacy', 'registry']),
         locked: factionsLocked,
         unlockHint: FACTIONS_UNLOCK_HINT,
       },
-      this.nav('codex', 'Codex', 'codex', '/codex', ['encyclopedia', 'achievements']),
-      this.nav('leaderboard', 'Leaderboard', 'leaderboard', '/leaderboard', ['rankings', 'scores']),
-      this.nav('profile', 'Profile', 'profile', '/profile', ['agent', 'settings', 'account']),
       {
-        ...this.nav('data', 'Data', 'data', '/data', ['supply', 'chain', 'terminal']),
+        ...this.nav('data', 'Data', 'data', '/data', 'economy', ['supply', 'chain', 'terminal']),
         locked: dataLocked,
         unlockHint: DATA_UNLOCK_HINT,
       },
-      this.nav('api', 'API', 'api', '/api', ['explorer', 'endpoints', 'developer']),
-      this.nav('logbook', 'Logbook', 'codex', '/logbook', ['log', 'history', 'journal']),
-      {
-        id: 'logbook-drawer',
-        label: 'Open log drawer',
-        icon: 'codex',
-        action: 'logbook-drawer',
-        locked: false,
-        activity: false,
-        keywords: ['log', 'drawer', 'quick'],
-      },
-      {
-        id: 'logout',
-        label: 'Logout',
-        icon: 'logout',
-        action: 'logout',
-        locked: false,
-        activity: false,
-        keywords: ['sign out', 'exit'],
-      },
+      this.nav('codex', 'Codex', 'codex', '/codex', 'exploration', ['encyclopedia', 'achievements']),
+      this.nav('logbook', 'Logbook', 'codex', '/logbook', 'exploration', ['log', 'history', 'journal']),
+      this.nav('leaderboard', 'Leaderboard', 'leaderboard', '/leaderboard', 'exploration', ['rankings', 'scores']),
+      this.nav('profile', 'Profile', 'profile', '/profile', 'meta', ['agent', 'settings', 'account']),
+      this.nav('api', 'API', 'api', '/api', 'meta', ['explorer', 'endpoints', 'developer']),
+      this.nav('logbook-drawer', 'Open log drawer', 'codex', undefined, 'meta', ['log', 'drawer', 'quick'], 'logbook-drawer'),
+      this.nav('logout', 'Logout', 'logout', undefined, 'meta', ['sign out', 'exit'], 'logout'),
     ];
+  });
+
+  readonly railSections = computed<NavSectionGroup[]>(() => {
+    const visible = this.items().filter((item) => item.id !== 'logbook-drawer');
+    const order: NavSection[] = ['ops', 'economy', 'exploration', 'meta'];
+    return order.map((id) => ({
+      id,
+      label: SECTION_LABELS[id],
+      items: visible.filter((item) => item.section === id),
+    }));
   });
 
   readonly navPaletteCommands = computed<PaletteCommand[]>(() =>
@@ -154,10 +174,13 @@ export class NavCommandsService {
     label: string,
     icon: NavIconName,
     route: string | undefined,
+    section: NavSection,
     keywords: string[],
     action?: NavItemView['action'],
     activity = false,
     activityKind?: 'good' | 'warn',
+    badge?: number,
+    badgeKind?: 'neutral' | 'warn' | 'good',
   ): NavItemView {
     return {
       id,
@@ -165,9 +188,12 @@ export class NavCommandsService {
       icon,
       route,
       action,
+      section,
       locked: false,
       activity,
       activityKind,
+      badge: badge && badge > 0 ? badge : undefined,
+      badgeKind,
       keywords,
     };
   }

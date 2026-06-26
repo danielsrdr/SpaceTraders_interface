@@ -1,0 +1,221 @@
+@if (terminalShip(); as ship) {
+  <div class="mb-2 flex items-center gap-2">
+    <p class="sk-crt-section-label m-0 flex-1">Cargo · {{ ship.symbol }}</p>
+    <button
+      type="button"
+      class="sk-btn px-2 py-1 text-xs"
+      [disabled]="actionLoading('cargo-' + ship.symbol)"
+      (click)="loadShipCargo(ship.symbol)"
+    >
+      {{ actionLoading('cargo-' + ship.symbol) ? '…' : 'Refresh' }}
+    </button>
+  </div>
+
+  @if (shipCargo(); as cargo) {
+    <div class="mb-1 flex items-center gap-2">
+      <div class="sk-gauge flex-1">
+        <div
+          class="sk-gauge-fill"
+          [style.width.%]="cargo.capacity ? (cargo.units / cargo.capacity) * 100 : 0"
+        ></div>
+      </div>
+      <span class="shrink-0 text-[11px] text-phosphor">
+        {{ cargo.units }}/{{ cargo.capacity }}
+      </span>
+    </div>
+
+    @if (cargo.inventory.length) {
+      <div class="flex flex-col gap-1">
+        @for (item of cargo.inventory; track item.symbol) {
+          <app-cargo-item-row
+            [item]="item"
+            [selected]="jettisonSymbol() === item.symbol"
+            (pick)="jettisonSymbol.set($event); transferSymbol.set($event)"
+          />
+        }
+      </div>
+
+      <div class="sk-panel-section">
+        <p class="sk-crt-section-label">Jettison</p>
+        <div class="flex gap-1">
+          <input
+            type="number"
+            min="1"
+            class="sk-input m-0 w-16"
+            [value]="jettisonUnits()"
+            (input)="jettisonUnits.set(+$any($event.target).value || 1)"
+          />
+          <button
+            type="button"
+            class="sk-btn flex-1"
+            [disabled]="!jettisonSymbol() || actionLoading('jettison-' + ship.symbol)"
+            (click)="jettisonShipSymbol.set(ship.symbol); jettisonCargo()"
+          >
+            Jettison {{ jettisonSymbol() }}
+          </button>
+        </div>
+      </div>
+
+      <div class="sk-panel-section">
+        <p class="sk-crt-section-label">Transfer</p>
+        <select
+          class="sk-select m-0 w-full"
+          [value]="transferTargetShip()"
+          (change)="transferTargetShip.set($any($event.target).value)"
+        >
+          <option value="">Target ship at waypoint</option>
+          @for (s of shipsAtWaypoint(ship.nav.waypointSymbol); track s.symbol) {
+            @if (s.symbol !== ship.symbol) {
+              <option [value]="s.symbol">{{ s.symbol }}</option>
+            }
+          }
+        </select>
+        <div class="mt-1 flex gap-1">
+          <input
+            type="number"
+            min="1"
+            class="sk-input m-0 w-16"
+            [value]="transferUnits()"
+            (input)="transferUnits.set(+$any($event.target).value || 1)"
+          />
+          <button
+            type="button"
+            class="sk-btn flex-1"
+            [disabled]="
+              !transferTargetShip() ||
+              !transferSymbol() ||
+              actionLoading('transfer-' + ship.symbol)
+            "
+            (click)="transferCargoAction()"
+          >
+            Transfer {{ transferSymbol() }}
+          </button>
+        </div>
+      </div>
+    } @else {
+      <p class="sk-panel-meta">Hold is empty.</p>
+    }
+  } @else {
+    <button
+      type="button"
+      class="sk-btn w-full"
+      [disabled]="actionLoading('cargo-' + ship.symbol)"
+      (click)="loadShipCargo(ship.symbol)"
+    >
+      {{ actionLoading('cargo-' + ship.symbol) ? '…' : 'Open cargo' }}
+    </button>
+  }
+
+  <div class="sk-panel-section">
+    <div class="flex items-center gap-2">
+      <p class="sk-crt-section-label m-0 flex-1">Refit</p>
+      <button
+        type="button"
+        class="sk-btn px-2 py-1 text-xs"
+        [disabled]="actionLoading('mounts-' + ship.symbol)"
+        (click)="loadShipMounts(ship.symbol)"
+      >
+        {{ actionLoading('mounts-' + ship.symbol) ? '…' : 'Load' }}
+      </button>
+    </div>
+
+    @if (shipMounts().length) {
+      <p class="sk-crt-section-label mt-2">Mounts</p>
+      @for (mount of shipMounts(); track mount.symbol) {
+        <div class="sk-crt-row mb-1">
+          <span class="flex-1 truncate text-[11px]">{{ mount.name }}</span>
+          <button
+            type="button"
+            class="sk-btn px-2 py-1 text-xs"
+            [disabled]="actionLoading('remove-mount-' + ship.symbol)"
+            (click)="removeMountAction(ship.symbol, mount.symbol)"
+          >
+            Remove
+          </button>
+        </div>
+      }
+    }
+    <div class="mt-1 flex gap-1">
+      <input
+        class="sk-input m-0 flex-1 text-sm"
+        placeholder="Mount symbol from cargo"
+        [value]="mountSymbol()"
+        (input)="mountSymbol.set($any($event.target).value)"
+      />
+      <button
+        type="button"
+        class="sk-btn"
+        [disabled]="actionLoading('install-mount-' + ship.symbol)"
+        (click)="installMountAction(ship.symbol)"
+      >
+        Install
+      </button>
+    </div>
+
+    @if (shipModules().length) {
+      <p class="sk-crt-section-label mt-2">Modules</p>
+      @for (mod of shipModules(); track mod.symbol) {
+        <div class="sk-crt-row mb-1">
+          <span class="flex-1 truncate text-[11px]">{{ mod.name }}</span>
+          <button
+            type="button"
+            class="sk-btn px-2 py-1 text-xs"
+            [disabled]="actionLoading('remove-module-' + ship.symbol)"
+            (click)="removeModuleAction(ship.symbol, mod.symbol)"
+          >
+            Remove
+          </button>
+        </div>
+      }
+    }
+    <div class="mt-1 flex gap-1">
+      <input
+        class="sk-input m-0 flex-1 text-sm"
+        placeholder="Module symbol from cargo"
+        [value]="moduleSymbol()"
+        (input)="moduleSymbol.set($any($event.target).value)"
+      />
+      <button
+        type="button"
+        class="sk-btn"
+        [disabled]="actionLoading('install-module-' + ship.symbol)"
+        (click)="installModuleAction(ship.symbol)"
+      >
+        Install
+      </button>
+    </div>
+  </div>
+
+  <div class="sk-panel-section">
+    <div class="flex items-center gap-2">
+      <p class="sk-crt-section-label m-0 flex-1">Maintenance</p>
+      <button
+        type="button"
+        class="sk-btn px-2 py-1 text-xs"
+        (click)="loadShipMaintenance(ship.symbol)"
+      >
+        Quotes
+      </button>
+    </div>
+    <div class="sk-action-grid mt-1">
+      <button
+        type="button"
+        class="sk-btn flex-1"
+        [disabled]="actionLoading('repair-' + ship.symbol)"
+        (click)="repairShipSymbol.set(ship.symbol); repairShipAction()"
+      >
+        Repair{{ repairQuote() != null ? ' (' + repairQuote() + 'c)' : '' }}
+      </button>
+      <button
+        type="button"
+        class="sk-btn flex-1"
+        [disabled]="actionLoading('scrap-' + ship.symbol)"
+        (click)="scrapShipSymbol.set(ship.symbol); scrapShipAction()"
+      >
+        Scrap{{ scrapQuote() != null ? ' (' + scrapQuote() + 'c)' : '' }}
+      </button>
+    </div>
+  </div>
+} @else {
+  <p class="sk-panel-meta">Select a ship to inspect cargo.</p>
+}

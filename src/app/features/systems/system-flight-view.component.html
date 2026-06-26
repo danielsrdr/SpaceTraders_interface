@@ -31,8 +31,92 @@
     </div>
   }
 
-  <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-between p-4">
-    <div class="flex w-full max-w-3xl items-start justify-between gap-3">
+  <div
+    class="pointer-events-none flex flex-col pr-3 pb-3"
+    [class.absolute]="chromeMode() !== 'embedded'"
+    [class.inset-0]="chromeMode() !== 'embedded'"
+    [class.left-0]="chromeMode() !== 'embedded'"
+    [class.top-0]="chromeMode() !== 'embedded'"
+    [class.right-0]="chromeMode() !== 'embedded'"
+    [class.bottom-0]="chromeMode() !== 'embedded'"
+    [class.pt-3]="chromeMode() !== 'embedded'"
+    [class.sk-flight-hud--embedded]="chromeMode() === 'embedded'"
+  >
+    @if (chromeMode() === 'embedded') {
+      <div class="pointer-events-auto flex max-w-[calc(100%-7rem)] flex-col gap-1.5">
+        <p class="m-0 max-w-md text-[10px] leading-snug text-slate-400/80">
+          @if (cameraMode() === 'god') {
+            Global view · G ship · click waypoint to travel
+          } @else if (cameraMode() === 'cockpit') {
+            Cockpit · C exit · Esc release pointer
+          } @else {
+            Click planet/ship · G global · C cockpit · drag orbit
+          }
+        </p>
+        <div class="flex flex-wrap items-center gap-1 pr-[7.5rem]">
+          <button type="button" class="sk-btn px-2 py-0.5 text-[10px]" (click)="toggleCameraMode()">
+            {{ cameraMode() === 'god' ? 'Ship view' : 'Global view' }}
+          </button>
+          <button
+            type="button"
+            class="sk-btn px-2 py-0.5 text-[10px]"
+            [class.ring-1]="cameraMode() === 'cockpit'"
+            [class.ring-cyan-400]="cameraMode() === 'cockpit'"
+            (click)="toggleCockpit()"
+          >
+            {{ cameraMode() === 'cockpit' ? 'Exit cockpit' : 'Cockpit' }}
+          </button>
+          @for (scale of timeScaleOptions; track scale) {
+            <button
+              type="button"
+              class="sk-btn px-2 py-0.5 text-[10px]"
+              [class.ring-1]="timeScale() === scale"
+              [class.ring-cyan-400]="timeScale() === scale"
+              (click)="setTimeScale(scale)"
+            >
+              {{ scale === 0 ? 'Pause' : scale + 'x' }}
+            </button>
+          }
+          <button
+            type="button"
+            class="sk-btn px-2 py-0.5 text-[10px]"
+            [class.ring-1]="highQuality()"
+            [class.ring-cyan-400]="highQuality()"
+            (click)="toggleBloom()"
+          >
+            {{ highQuality() ? 'Bloom: High' : 'Bloom: Off' }}
+          </button>
+          <button
+            type="button"
+            class="sk-btn px-2 py-0.5 text-[10px]"
+            [class.ring-1]="!radioMuted()"
+            [class.ring-cyan-400]="!radioMuted()"
+            (click)="toggleRadio()"
+          >
+            {{ radioMuted() ? 'Radio: Off' : 'Radio: On' }}
+          </button>
+          @if (cameraMode() === 'god') {
+            <button type="button" class="sk-btn px-2 py-0.5 text-[10px]" (click)="togglePlanetNames()">
+              {{ showPlanetNames() ? 'Hide names' : 'Show names' }}
+            </button>
+            @for (filter of godViewFilters; track filter) {
+              <button
+                type="button"
+                class="sk-btn px-2 py-0.5 text-[10px]"
+                [class.ring-1]="godViewFilter() === filter"
+                [class.ring-cyan-400]="godViewFilter() === filter"
+                (click)="setGodViewFilter(filter)"
+              >
+                {{ godFilterLabel(filter) }}
+              </button>
+            }
+          }
+        </div>
+      </div>
+    } @else {
+    <div
+      class="flex w-full items-start gap-3 justify-between"
+    >
       <div>
         <h2 class="font-display text-xl tracking-widest text-sky-300/90 uppercase">
           {{ systemName() || 'System map' }}
@@ -47,7 +131,7 @@
           }
         </p>
       </div>
-      <div class="pointer-events-auto flex flex-col items-end gap-1">
+      <div class="pointer-events-auto flex shrink-0 flex-col items-end gap-1">
         <button type="button" class="sk-btn px-3 py-1 text-xs" (click)="toggleCameraMode()">
           {{ cameraMode() === 'god' ? 'Ship view' : 'Global view' }}
         </button>
@@ -111,6 +195,7 @@
         }
       </div>
     </div>
+    }
   </div>
 
   @if (cameraMode() === 'god' && showPlanetNames()) {
@@ -222,7 +307,10 @@
 
   <canvas
     #radar
-    class="pointer-events-auto absolute right-4 bottom-4 h-28 w-28 cursor-crosshair rounded-full bg-slate-950/60 ring-1 ring-sky-500/40"
+    class="pointer-events-auto absolute h-28 w-28 cursor-crosshair rounded-full bg-slate-950/60 ring-1 ring-sky-500/40"
+    [class.bottom-4]="chromeMode() !== 'embedded'"
+    [class.right-4]="chromeMode() !== 'embedded'"
+    [class.sk-flight-radar--embedded]="chromeMode() === 'embedded'"
     width="112"
     height="112"
     (click)="onRadarClick($event)"

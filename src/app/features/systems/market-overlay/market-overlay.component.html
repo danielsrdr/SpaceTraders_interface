@@ -1,0 +1,113 @@
+<div class="fixed inset-0 z-[9990] flex items-center justify-center bg-black/50 p-4" (click)="close.emit()">
+  <aside
+    class="sk-crt flex max-h-[min(88vh,640px)] w-full max-w-md flex-col overflow-hidden"
+    (click)="$event.stopPropagation()"
+  >
+  <div class="sk-crt-titlebar">
+    <span class="sk-crt-led" [class.sk-crt-led--busy]="!!loadingAction()"></span>
+    <h2 class="m-0 flex-1 truncate font-display text-sm tracking-widest text-white uppercase">
+      Market — {{ market().symbol }}
+    </h2>
+    <button type="button" class="sk-btn px-2 py-1 text-xs" (click)="close.emit()">Close</button>
+  </div>
+
+  <div class="sk-crt-body min-h-0 flex-1 overflow-y-auto">
+    @if (market().tradeGoods?.length) {
+      <div class="flex flex-col gap-1">
+        @for (good of market().tradeGoods; track good.symbol) {
+          <app-trade-good-row
+            [good]="good"
+            [selected]="tradeSymbol() === good.symbol"
+            [heldUnits]="cargoUnitsOf()(good.symbol)"
+            [maxProceeds]="maxCargoProceeds()"
+            (pick)="tradeSymbol.set($event)"
+          />
+        }
+      </div>
+    } @else {
+      @if (market().exports.length) {
+        <p class="sk-crt-section-label">Exports</p>
+        <div class="mb-2 flex flex-wrap gap-1">
+          @for (g of market().exports; track g.symbol) {
+            <span class="sk-crt-row px-2 py-1 text-[11px]">{{ g.symbol }}</span>
+          }
+        </div>
+      }
+      @if (market().imports.length) {
+        <p class="sk-crt-section-label">Imports</p>
+        <div class="mb-2 flex flex-wrap gap-1">
+          @for (g of market().imports; track g.symbol) {
+            <span class="sk-crt-row px-2 py-1 text-[11px]">{{ g.symbol }}</span>
+          }
+        </div>
+      }
+      @if (market().exchange.length) {
+        <p class="sk-crt-section-label">Exchange</p>
+        <div class="flex flex-wrap gap-1">
+          @for (g of market().exchange; track g.symbol) {
+            <span class="sk-crt-row px-2 py-1 text-[11px]">{{ g.symbol }}</span>
+          }
+        </div>
+      }
+    }
+
+    @if (selectedPlanet(); as planet) {
+      @if (dockedAt().length) {
+        <div class="sk-panel-section">
+          <p class="sk-crt-section-label">Trade</p>
+          <label class="sk-crt-section-label" for="trade-ship">Ship</label>
+          <select
+            id="trade-ship"
+            class="sk-select m-0 w-full"
+            [value]="tradeShip()"
+            (change)="tradeShip.set($any($event.target).value)"
+          >
+            <option value="">Select docked ship</option>
+            @for (ship of dockedAt(); track ship.symbol) {
+              <option [value]="ship.symbol">{{ ship.symbol }}</option>
+            }
+          </select>
+          <div class="mt-1 flex gap-1">
+            <select
+              class="sk-select m-0 flex-1"
+              [value]="tradeSymbol()"
+              (change)="tradeSymbol.set($any($event.target).value)"
+            >
+              @for (good of market().tradeGoods ?? []; track good.symbol) {
+                <option [value]="good.symbol">{{ good.symbol }}</option>
+              }
+            </select>
+            <input
+              type="number"
+              min="1"
+              class="sk-input m-0 w-16"
+              [value]="tradeUnits()"
+              (input)="tradeUnits.set(+$any($event.target).value || 1)"
+            />
+          </div>
+          <div class="sk-action-grid mt-1">
+            <button
+              type="button"
+              class="sk-btn flex-1"
+              [disabled]="actionLoading('buy-' + tradeShip())"
+              (click)="tradeCargo('buy')"
+            >
+              {{ actionLoading('buy-' + tradeShip()) ? '…' : 'Buy' }}
+            </button>
+            <button
+              type="button"
+              class="sk-btn flex-1"
+              [disabled]="actionLoading('sell-' + tradeShip())"
+              (click)="tradeCargo('sell')"
+            >
+              {{ actionLoading('sell-' + tradeShip()) ? '…' : 'Sell' }}
+            </button>
+          </div>
+        </div>
+      } @else {
+        <p class="sk-panel-meta mt-2 text-amber-300">Dock a ship here to trade.</p>
+      }
+    }
+  </div>
+  </aside>
+</div>

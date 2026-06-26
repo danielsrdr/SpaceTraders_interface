@@ -70,8 +70,326 @@
     @apply m-1.5 rounded-[3px] border-none bg-accent px-2.5 py-2.5 text-[15px] text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent;
   }
 
-  .sk-title {
-    @apply absolute ml-[50px] w-fit rounded-[5px] bg-surface-overlay px-2.5 py-2.5 text-[50px] [text-shadow:4px_2px_black];
+  .sk-map-canvas {
+    @apply relative h-full w-full overflow-hidden bg-black;
+  }
+
+  /* Global floating chrome (Alerts / Log) — positioning lives here, not Tailwind utilities */
+  .sk-notifications-trigger {
+    position: fixed;
+    z-index: 9000;
+    top: 0.65rem;
+    right: 0.75rem;
+  }
+
+  .sk-logbook-trigger {
+    position: fixed;
+    z-index: 9000;
+    bottom: 0.75rem;
+    left: calc(var(--sk-chrome-left, 3.5rem) + 0.75rem);
+  }
+
+  html.sk-rail-pinned {
+    --sk-chrome-left: 12rem;
+  }
+
+  html:not(.sk-rail-pinned) {
+    --sk-chrome-left: 3.5rem;
+  }
+
+  /* System map — 2-column shell: canvas | terminal (optional) */
+  .sk-system-layout {
+    --sk-system-terminal-w: 24rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    background: #030508;
+  }
+
+  .sk-system-layout--terminal {
+    grid-template-columns: minmax(0, 1fr) var(--sk-system-terminal-w);
+  }
+
+  .sk-system-layout--surface {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sk-system-canvas-col {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sk-map-canvas {
+    position: relative;
+    z-index: 1;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /* Alerts / Log live inside the canvas column on the system map */
+  .sk-canvas-chrome {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    padding: 0.65rem 0.75rem;
+  }
+
+  .sk-canvas-chrome-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .sk-canvas-terminal {
+    pointer-events: auto;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  /* System map toolbar — Fleet / Find / Ops */
+  app-system-sidebar {
+    display: block;
+    min-width: 0;
+    max-width: min(100%, 28rem);
+  }
+
+  .sk-sidebar-dock {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid color-mix(in oklch, var(--color-accent) 22%, transparent);
+    border-radius: 5px;
+    background: rgba(3, 6, 14, 0.82);
+    backdrop-filter: blur(6px);
+  }
+
+  .sk-sidebar-dock-system {
+    margin-right: 0.15rem;
+    padding-right: 0.5rem;
+    border-right: 1px solid color-mix(in oklch, var(--color-accent) 18%, transparent);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-phosphor-dim);
+    white-space: nowrap;
+  }
+
+  .sk-sidebar-dock-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.55rem;
+    border: 1px solid color-mix(in oklch, var(--color-accent) 18%, transparent);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-phosphor-dim);
+    cursor: pointer;
+    transition:
+      color 150ms var(--ease-out-soft),
+      background 150ms var(--ease-out-soft),
+      border-color 150ms var(--ease-out-soft);
+  }
+
+  .sk-sidebar-dock-btn:hover {
+    color: var(--color-phosphor);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: color-mix(in oklch, var(--color-accent) 40%, transparent);
+  }
+
+  .sk-sidebar-dock-btn:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  .sk-sidebar-dock-btn--active {
+    color: var(--color-ink);
+    background: color-mix(in oklch, var(--color-accent) 18%, transparent);
+    border-color: var(--color-accent);
+  }
+
+  .sk-sidebar-dock-badge {
+    min-width: 1rem;
+    padding: 0 0.25rem;
+    border-radius: 9999px;
+    background: color-mix(in oklch, var(--color-accent) 28%, transparent);
+    font-size: 9px;
+    letter-spacing: 0;
+    color: var(--color-phosphor);
+    line-height: 1.35;
+  }
+
+  .sk-sidebar-dock-ship {
+    margin-left: auto;
+    max-width: 8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    color: var(--color-phosphor-dim);
+  }
+
+  .sk-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    border: 0;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.35);
+    cursor: default;
+    pointer-events: auto;
+  }
+
+  .sk-sidebar-panel {
+    position: fixed;
+    top: 3.25rem;
+    bottom: 0.75rem;
+    left: calc(var(--sk-chrome-left, 3.5rem) + 0.75rem + var(--sk-rail-push, 0rem));
+    z-index: 110;
+    display: flex;
+    width: min(
+      18rem,
+      calc(100vw - var(--sk-chrome-left, 3.5rem) - var(--sk-rail-push, 0rem) - 1.5rem)
+    );
+    min-height: 0;
+    flex-direction: column;
+    pointer-events: auto;
+    transition:
+      left 0.22s var(--ease-out-soft),
+      width 0.22s var(--ease-out-soft);
+    animation: sk-sidebar-panel-in 180ms var(--ease-out-soft);
+  }
+
+  body:has(.sk-system-layout) .sk-rail {
+    z-index: 20;
+    border-right: 1px solid color-mix(in oklch, var(--color-accent) 15%, transparent);
+    background: linear-gradient(180deg, rgba(3, 6, 14, 0.88), rgba(2, 4, 10, 0.92));
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.35);
+  }
+
+  @keyframes sk-sidebar-panel-in {
+    from {
+      opacity: 0;
+      transform: translateY(-0.35rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .sk-system-terminal-col {
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid color-mix(in oklch, var(--color-accent) 25%, transparent);
+    background: linear-gradient(180deg, rgba(6, 10, 20, 0.94), rgba(3, 5, 12, 0.98));
+  }
+
+  .sk-system-terminal-col > app-system-cockpit-terminal,
+  .sk-system-terminal-col .sk-system-terminal {
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+
+  /* Ships — reserve top-right for Alerts via page header padding */
+  .sk-ships-page {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .sk-ships-header {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 1rem;
+    padding: 0.65rem 9.5rem 0.65rem 0;
+    border-bottom: 1px solid color-mix(in oklch, var(--color-accent) 20%, transparent);
+    background: linear-gradient(180deg, rgba(6, 10, 20, 0.88), rgba(3, 5, 12, 0.72));
+  }
+
+  .sk-ships-body {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .sk-ships-body--inspect {
+    grid-template-columns: minmax(0, 1fr) min(340px, 34vw);
+  }
+
+  .sk-ships-main {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .sk-ships-inspect {
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid color-mix(in oklch, var(--color-accent) 25%, transparent);
+    background: linear-gradient(180deg, rgba(6, 10, 20, 0.94), rgba(3, 5, 12, 0.98));
+  }
+
+  @media (max-width: 960px) {
+    .sk-system-layout,
+    .sk-system-layout--terminal {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr);
+    }
+
+    .sk-system-layout--terminal {
+      grid-template-rows: minmax(0, 1fr) minmax(180px, 34vh);
+    }
+
+    .sk-system-terminal-col {
+      border-left: 0;
+      border-top: 1px solid color-mix(in oklch, var(--color-accent) 25%, transparent);
+      max-height: 38vh;
+    }
+
+    .sk-sidebar-panel {
+      top: auto;
+      right: 0.5rem;
+      bottom: 0.5rem;
+      left: 0.5rem;
+      width: auto;
+      max-height: min(50vh, 22rem);
+      border-radius: 4px;
+    }
+
+    .sk-sidebar-dock-ship {
+      display: none;
+    }
   }
 
   .sk-panel {
@@ -261,11 +579,22 @@
   }
 
   .sk-crt-log {
-    @apply flex flex-col-reverse gap-0.5 border-t border-white/10 px-3 py-2;
-    max-height: 7.5rem;
+    @apply flex flex-col-reverse gap-0.5 px-3 py-2;
+    max-height: 5rem;
     overflow-y: auto;
     font-size: 11px;
     line-height: 1.5;
+  }
+
+  .sk-system-terminal .sk-crt-log {
+    max-height: 3.25rem;
+    border-top: 0;
+  }
+
+  .sk-system-terminal-footer {
+    background: rgba(0, 0, 0, 0.35);
+    max-height: 4rem;
+    overflow: hidden;
   }
 
   .sk-log-line {
@@ -789,6 +1118,196 @@
     right: 2px;
   }
 
+  /* Fixed lateral navigation rail */
+  .sk-rail {
+    --sk-rail-collapsed: 3.5rem;
+    --sk-rail-expanded: 12rem;
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    width: var(--sk-rail-collapsed);
+    height: 100vh;
+    padding: 0.5rem 0.35rem;
+    border-right: 1px solid color-mix(in oklch, var(--color-accent) 35%, transparent);
+    background: linear-gradient(180deg, rgba(6, 10, 20, 0.94), rgba(3, 5, 12, 0.98));
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.45);
+    overflow-x: hidden;
+    overflow-y: auto;
+    transition: width 0.22s var(--ease-out-soft);
+  }
+
+  .sk-rail--expanded,
+  .sk-rail--pinned {
+    width: var(--sk-rail-expanded);
+  }
+
+  html.sk-rail-pinned .sk-shell-main {
+    padding-left: var(--sk-rail-expanded);
+  }
+
+  html:not(.sk-rail-pinned) .sk-shell-main {
+    padding-left: var(--sk-rail-collapsed);
+  }
+
+  .sk-shell-main {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .sk-shell-main > * {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .sk-rail-header {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0.15rem 0.25rem 0.35rem;
+  }
+
+  .sk-rail-pin {
+    display: grid;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: color-mix(in oklch, var(--color-accent) 50%, white 25%);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .sk-rail--expanded .sk-rail-pin,
+  .sk-rail--pinned .sk-rail-pin {
+    opacity: 1;
+  }
+
+  .sk-rail-pin-icon {
+    width: 0.85rem;
+    height: 0.85rem;
+  }
+
+  .sk-rail-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .sk-rail-section-label {
+    margin: 0.35rem 0 0.1rem 0.55rem;
+    font-size: 0.62rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: color-mix(in oklch, white 35%, transparent);
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .sk-rail--expanded .sk-rail-section-label,
+  .sk-rail--pinned .sk-rail-section-label {
+    opacity: 1;
+  }
+
+  .sk-rail-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    width: 100%;
+    min-height: 2.35rem;
+    padding: 0.35rem 0.45rem;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: color-mix(in oklch, var(--color-accent) 55%, white 30%);
+    cursor: pointer;
+    text-align: left;
+    transition:
+      background 0.15s,
+      color 0.15s;
+  }
+
+  .sk-rail-item:hover,
+  .sk-rail-item:focus-visible {
+    background: rgba(69, 128, 255, 0.12);
+    color: var(--color-ink);
+    outline: none;
+  }
+
+  .sk-rail-item--active {
+    background: rgba(69, 128, 255, 0.18);
+    color: var(--color-ink);
+    box-shadow: inset 2px 0 0 var(--color-accent);
+  }
+
+  .sk-rail-item--locked {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  .sk-rail-icon {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid color-mix(in oklch, var(--color-accent) 40%, transparent);
+    border-radius: 9999px;
+    background: radial-gradient(circle at 50% 32%, rgba(40, 70, 140, 0.4), rgba(3, 5, 12, 0.92) 72%);
+  }
+
+  .sk-rail-label {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.78rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .sk-rail--expanded .sk-rail-label,
+  .sk-rail--pinned .sk-rail-label {
+    opacity: 1;
+  }
+
+  .sk-nav-badge {
+    flex-shrink: 0;
+    min-width: 1.1rem;
+    padding: 0.05rem 0.35rem;
+    border-radius: 9999px;
+    background: rgba(69, 128, 255, 0.35);
+    color: var(--color-ink);
+    font-size: 0.65rem;
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  .sk-nav-badge--warn {
+    background: color-mix(in oklch, var(--color-warn) 75%, black 10%);
+  }
+
+  .sk-nav-badge--good {
+    background: color-mix(in oklch, var(--color-phosphor) 65%, black 10%);
+  }
+
+  .sk-rail-item .sk-nav-dot {
+    position: static;
+    flex-shrink: 0;
+    margin-left: auto;
+  }
+
     /* Contracts mission board */
   .sk-mission-grid {
     @apply grid w-full gap-4;
@@ -1231,4 +1750,80 @@
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/*
+ * System map layout — unlayered so these beat Tailwind utilities (absolute, p-3, etc.)
+ */
+html:has(.sk-system-layout) {
+  --sk-nav-offset: calc(var(--sk-chrome-left, 3.5rem) + 0.75rem);
+}
+
+html:has(.sk-system-layout):has(.sk-rail--expanded) {
+  --sk-nav-offset: calc(12rem + 0.75rem);
+}
+
+body:has(.sk-system-layout) {
+  --sk-bottom-chrome-right: 0.75rem;
+  --sk-log-btn-w: 6.25rem;
+}
+
+body:has(.sk-system-layout--terminal) {
+  --sk-bottom-chrome-right: calc(var(--sk-system-terminal-w, 24rem) + 0.75rem);
+}
+
+/* Row 1 — Fleet / Find / Ops */
+body:has(.sk-system-layout) .sk-system-top-chrome {
+  position: fixed;
+  top: 0.65rem;
+  left: var(--sk-nav-offset);
+  z-index: 35;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  width: auto;
+  max-width: min(40rem, calc(100vw - var(--sk-nav-offset) - 1rem));
+  pointer-events: none;
+  transition: left 0.22s var(--ease-out-soft);
+}
+
+body:has(.sk-system-layout) .sk-system-top-chrome > * {
+  pointer-events: auto;
+}
+
+/* Row 2 — Global view / Cockpit / Pause (fixed, same left edge as row 1) */
+body:has(.sk-system-layout) .sk-flight-hud--embedded {
+  position: fixed;
+  top: 3.4rem;
+  left: var(--sk-nav-offset);
+  right: 0;
+  bottom: 0;
+  z-index: 34;
+  padding: 0.5rem 0.75rem 0.75rem 0;
+  transition: left 0.22s var(--ease-out-soft);
+}
+
+body:has(.sk-system-layout) .sk-flight-radar--embedded {
+  position: fixed;
+  right: 1rem;
+  bottom: 6.25rem;
+  z-index: 33;
+}
+
+body:has(.sk-system-layout) .sk-logbook-trigger {
+  top: auto;
+  left: auto;
+  right: var(--sk-bottom-chrome-right);
+  bottom: 0.75rem;
+}
+
+body:has(.sk-system-layout) .sk-notifications-trigger {
+  top: auto;
+  right: calc(var(--sk-bottom-chrome-right) + var(--sk-log-btn-w));
+  bottom: 0.75rem;
+}
+
+body:has(.sk-system-layout) .sk-sidebar-panel {
+  left: var(--sk-nav-offset);
+  width: min(18rem, calc(100vw - var(--sk-nav-offset) - 1rem));
 }

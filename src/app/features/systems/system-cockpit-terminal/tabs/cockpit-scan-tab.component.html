@@ -1,0 +1,126 @@
+@if (terminalShip(); as ship) {
+  <p class="sk-crt-section-label">Sensors · {{ ship.symbol }}</p>
+  <div class="sk-action-grid">
+    <button
+      type="button"
+      class="sk-btn"
+      [disabled]="actionLoading('scan-sys-' + ship.symbol)"
+      (click)="scanSystems(ship.symbol)"
+    >
+      Systems
+    </button>
+    <button
+      type="button"
+      class="sk-btn"
+      [disabled]="actionLoading('scan-wp-' + ship.symbol)"
+      (click)="scanWaypoints(ship.symbol)"
+    >
+      Waypoints
+    </button>
+    <button
+      type="button"
+      class="sk-btn"
+      [disabled]="actionLoading('scan-ships-' + ship.symbol)"
+      (click)="scanShips(ship.symbol)"
+    >
+      Ships
+    </button>
+    <button
+      type="button"
+      class="sk-btn"
+      [disabled]="actionLoading('scan-surface-' + ship.symbol)"
+      (click)="scanSurface(ship.symbol)"
+    >
+      Surface
+    </button>
+  </div>
+
+  <div class="sk-panel-section">
+    <p class="sk-crt-section-label">Mining</p>
+    <div class="sk-action-grid">
+      <button
+        type="button"
+        class="sk-btn"
+        [disabled]="actionLoading('extract-' + ship.symbol)"
+        (click)="extractResources(ship.symbol)"
+      >
+        Extract
+      </button>
+      <button
+        type="button"
+        class="sk-btn"
+        [disabled]="actionLoading('siphon-' + ship.symbol)"
+        (click)="siphonResources(ship.symbol)"
+      >
+        Siphon
+      </button>
+      <button
+        type="button"
+        class="sk-btn"
+        [disabled]="actionLoading('survey-' + ship.symbol)"
+        (click)="surveyWaypoint(ship.symbol)"
+      >
+        Survey
+      </button>
+    </div>
+  </div>
+
+  @if (shipSurveys().length) {
+    <div class="sk-panel-section">
+      <p class="sk-crt-section-label">Surveys</p>
+      @for (sv of shipSurveys(); track $index) {
+        <div class="sk-crt-row mb-1">
+          <span class="flex-1 truncate text-[11px]">{{ formatSurvey(sv) }}</span>
+          <button
+            type="button"
+            class="sk-btn px-2 py-1 text-xs"
+            [disabled]="actionLoading('extract-survey-' + ship.symbol)"
+            (click)="extractWithSurvey(ship.symbol, sv)"
+          >
+            Mine
+          </button>
+        </div>
+      }
+    </div>
+  }
+
+  @if (scanResults(); as results) {
+    @if (results.length) {
+      <div class="sk-panel-section">
+        <p class="sk-crt-section-label">Scan results</p>
+        <div class="flex flex-col gap-1">
+          @for (r of results; track $index) {
+            <div class="sk-crt-row text-[11px]">
+              <span class="flex-1 truncate">{{ r.symbol }}</span>
+              <span class="text-phosphor-dim">{{ r.type }}</span>
+            </div>
+          }
+        </div>
+      </div>
+    }
+  }
+
+  @if (shipScanResults(); as ships) {
+    @if (ships.length) {
+      <div class="sk-panel-section">
+        <p class="sk-crt-section-label">Ships detected</p>
+        @for (s of ships; track $index) {
+          <p class="sk-log-line m-0 text-[11px]">{{ formatShipScan(s) }}</p>
+        }
+      </div>
+    }
+  }
+
+  @if (surfaceScanResults(); as deposits) {
+    @if (deposits.length) {
+      <div class="sk-panel-section">
+        <p class="sk-crt-section-label">Deposits</p>
+        @for (d of deposits; track $index) {
+          <p class="sk-log-line m-0 text-[11px]">{{ formatSurfaceDeposit(d) }}</p>
+        }
+      </div>
+    }
+  }
+} @else {
+  <p class="sk-panel-meta">Select a ship to use sensors.</p>
+}

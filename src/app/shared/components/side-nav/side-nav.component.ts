@@ -1,47 +1,53 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { NavCommandsService, NavItemView } from '../../navigation/nav-commands.service';
 import { AgentStore } from '../../../core/state/agent.store';
 import { NavIconComponent } from './nav-icon.component';
+
+const PIN_KEY = 'sk_rail_pinned';
 
 @Component({
   selector: 'app-side-nav',
   templateUrl: './side-nav.component.html',
   imports: [NavIconComponent],
+  host: {
+    '(mouseenter)': 'hovering.set(true)',
+    '(mouseleave)': 'hovering.set(false)',
+  },
 })
 export class SideNavComponent {
   readonly agentStore = inject(AgentStore);
   private readonly navCommands = inject(NavCommandsService);
+  private readonly router = inject(Router);
 
-  readonly open = signal(false);
+  readonly pinned = signal(localStorage.getItem(PIN_KEY) === '1');
+  readonly hovering = signal(false);
 
-  readonly items = computed(() =>
-    this.navCommands.items().filter((item) => item.id !== 'logbook' && item.id !== 'logbook-drawer'),
-  );
-
-  readonly hasActivity = computed(() => this.items().some((item) => item.activity && !item.locked));
-
-  angleFor(index: number): number {
-    const count = this.items().length;
-    if (count <= 1) return 180;
-    const spread = 176;
-    return 180 + spread / 2 - index * (spread / (count - 1));
+  constructor() {
+    effect(() => {
+      document.documentElement.classList.toggle('sk-rail-pinned', this.pinned());
+    });
   }
 
-  toggle(): void {
-    this.open.update((value) => !value);
+  readonly expanded = computed(() => this.pinned() || this.hovering());
+
+  readonly sections = computed(() => this.navCommands.railSections());
+
+  isActive(item: NavItemView): boolean {
+    if (!item.route) return false;
+    const url = this.router.url.split('?')[0];
+    if (item.route === '/home') return url === '/home' || url === '/';
+    return url === item.route || url.startsWith(item.route + '/');
   }
 
-  onFocusOut(event: FocusEvent): void {
-    const next = event.relatedTarget as Node | null;
-    const host = event.currentTarget as HTMLElement;
-    if (!next || !host.contains(next)) {
-      this.open.set(false);
-    }
+  togglePin(): void {
+    const next = !this.pinned();
+    this.pinned.set(next);
+    localStorage.setItem(PIN_KEY, next ? '1' : '0');
   }
 
   onItemClick(item: NavItemView, event: Event): void {
     event.preventDefault();
-    this.open.set(false);
     this.navCommands.executeItem(item);
   }
 }

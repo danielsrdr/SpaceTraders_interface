@@ -1,0 +1,171 @@
+<div class="sk-sidebar-dock pointer-events-auto">
+  @if (systemData(); as system) {
+    <span
+      class="sk-sidebar-dock-system hidden sm:inline"
+      [title]="system.name ?? system.symbol"
+    >
+      {{ systemLabel() }}
+      <span class="text-white/40">· {{ planets().length }}</span>
+    </span>
+  }
+
+  <button
+    type="button"
+    class="sk-sidebar-dock-btn"
+    [class.sk-sidebar-dock-btn--active]="isPanelOpen('fleet')"
+    [attr.aria-expanded]="isPanelOpen('fleet')"
+    (click)="togglePanel('fleet')"
+  >
+    Fleet
+    @if (fleetCount() > 0) {
+      <span class="sk-sidebar-dock-badge">{{ fleetCount() }}</span>
+    }
+  </button>
+
+  <button
+    type="button"
+    class="sk-sidebar-dock-btn"
+    [class.sk-sidebar-dock-btn--active]="isPanelOpen('find')"
+    [attr.aria-expanded]="isPanelOpen('find')"
+    (click)="togglePanel('find')"
+  >
+    Find
+  </button>
+
+  <button
+    type="button"
+    class="sk-sidebar-dock-btn"
+    [class.sk-sidebar-dock-btn--active]="isPanelOpen('ops')"
+    [attr.aria-expanded]="isPanelOpen('ops')"
+    (click)="togglePanel('ops')"
+  >
+    Ops
+  </button>
+
+  @if (selectedShip(); as ship) {
+    <span class="sk-sidebar-dock-ship hidden md:inline" [title]="ship.symbol">
+      {{ ship.symbol }}
+    </span>
+  }
+</div>
+
+@if (activePanel(); as panel) {
+  <button
+    type="button"
+    class="sk-sidebar-backdrop pointer-events-auto"
+    aria-label="Close panel"
+    (click)="closePanel()"
+  ></button>
+
+  <aside
+    class="sk-crt sk-sidebar-panel pointer-events-auto"
+    role="dialog"
+    [attr.aria-label]="panel === 'fleet' ? 'Fleet' : panel === 'find' ? 'Find market' : 'Operations'"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="sk-crt-titlebar shrink-0">
+      <span class="sk-crt-led"></span>
+      <h2 class="m-0 flex-1 text-sm tracking-[0.2em] uppercase">
+        @switch (panel) {
+          @case ('fleet') { Fleet }
+          @case ('find') { Find }
+          @case ('ops') { Ops }
+        }
+      </h2>
+      <button type="button" class="sk-btn px-2 py-1 text-xs" (click)="closePanel()">Close</button>
+    </div>
+
+    <div class="sk-crt-body min-h-0 flex-1 overflow-y-auto">
+      @switch (panel) {
+        @case ('fleet') {
+          @if (shipsOnMap(ships(), systemSymbol()).length) {
+            <p class="sk-crt-section-label">Ships in system · keys 1–9</p>
+            <div class="flex flex-col gap-1">
+              @for (ship of shipsOnMap(ships(), systemSymbol()); track ship.symbol; let i = $index) {
+                <button
+                  type="button"
+                  class="sk-crt-row w-full flex-col items-start gap-0.5 text-left"
+                  [class.sk-crt-row--active]="selectedShip()?.symbol === ship.symbol"
+                  [class.opacity-60]="shipInTransit(ship)"
+                  (click)="onShipSelect(ship)"
+                >
+                  <div class="flex w-full items-center justify-between gap-2">
+                    <span class="truncate text-xs text-white/90">{{ ship.symbol }}</span>
+                    @if (i < 9) {
+                      <span class="shrink-0 text-[10px] text-white/35">[{{ i + 1 }}]</span>
+                    }
+                  </div>
+                  <div class="flex w-full items-center gap-2 text-[10px] text-white/55">
+                    <span class="sk-ship-badge shrink-0" [class]="shipStatusClass(ship.nav.status)">
+                      {{ ship.nav.status }}
+                    </span>
+                    @if (shipInTransit(ship)) {
+                      <span class="truncate">{{ shipEtaFn()(ship) }}</span>
+                    } @else {
+                      <span class="truncate">{{ ship.nav.waypointSymbol }}</span>
+                    }
+                  </div>
+                </button>
+              }
+            </div>
+          } @else {
+            <p class="sk-panel-meta m-0">No ships in this system.</p>
+          }
+        }
+        @case ('find') {
+          <p class="sk-crt-section-label">Market waypoint search</p>
+          <input
+            type="text"
+            class="sk-input m-0 mb-3 w-full text-sm"
+            placeholder="Find market waypoint..."
+            [value]="searchQuery()"
+            (input)="marketSearch.emit($event)"
+          />
+          @if (searchQuery() && marketSearchResults().length) {
+            <div class="flex flex-col gap-1">
+              @for (planet of marketSearchResults(); track planet.name) {
+                <button
+                  type="button"
+                  class="sk-crt-row w-full text-left text-xs"
+                  (click)="onMarketSelect(planet)"
+                >
+                  {{ planet.name }}
+                </button>
+              }
+            </div>
+          } @else if (searchQuery()) {
+            <p class="sk-panel-meta m-0 text-xs">No marketplace waypoints match.</p>
+          } @else {
+            <p class="sk-panel-meta m-0 text-xs">Type to filter marketplace waypoints.</p>
+          }
+        }
+        @case ('ops') {
+          @if (systemData(); as system) {
+            <p class="sk-crt-section-label">{{ system.symbol }} · {{ planets().length }} waypoints</p>
+          }
+          <div class="sk-action-grid">
+            <button type="button" class="sk-btn flex-1 px-2 py-1.5 text-xs" (click)="shareSpectator.emit()">
+              Share
+            </button>
+            <button type="button" class="sk-btn flex-1 px-2 py-1.5 text-xs" (click)="openPostcard.emit()">
+              Postcard
+            </button>
+            <button
+              type="button"
+              class="sk-btn flex-1 px-2 py-1.5 text-xs"
+              [class.bg-cyan-400/20]="ghostFleet.enabled()"
+              (click)="ghostFleet.toggle()"
+            >
+              {{ ghostFleet.enabled() ? 'Agents on' : 'Agents off' }}
+            </button>
+          </div>
+          @if (ghostFleet.enabled() && ghostShipsOnMap().length) {
+            <p class="sk-panel-meta mt-3 mb-0 text-[10px] text-white/45">
+              {{ ghostShipsOnMap().length }} ghost contact(s) on map
+            </p>
+          }
+        }
+      }
+    </div>
+  </aside>
+}

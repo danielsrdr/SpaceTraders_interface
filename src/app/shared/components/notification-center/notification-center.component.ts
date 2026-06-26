@@ -1,7 +1,8 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { AgentStore } from '../../../core/state/agent.store';
 import { NotificationEntry, NotificationStore } from '../../../core/state/notification.store';
+import { NotificationDrawerService } from '../../services/notification-drawer.service';
 
 @Component({
   selector: 'app-notification-center',
@@ -10,21 +11,22 @@ import { NotificationEntry, NotificationStore } from '../../../core/state/notifi
 export class NotificationCenterComponent {
   readonly agentStore = inject(AgentStore);
   readonly notifications = inject(NotificationStore);
+  readonly drawer = inject(NotificationDrawerService);
   private readonly router = inject(Router);
 
-  readonly open = signal(false);
+  readonly open = this.drawer.open;
   readonly unread = this.notifications.unreadCount;
   readonly entries = this.notifications.entriesReversed;
 
   toggle(): void {
-    this.open.update((v) => !v);
-    if (this.open()) {
+    this.drawer.toggle();
+    if (this.drawer.open()) {
       this.notifications.markAllRead();
     }
   }
 
   close(): void {
-    this.open.set(false);
+    this.drawer.close();
   }
 
   openEntry(entry: NotificationEntry): void {

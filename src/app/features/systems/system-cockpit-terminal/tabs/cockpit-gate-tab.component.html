@@ -1,0 +1,47 @@
+@if (jumpGate(); as gate) {
+  <div class="mb-2 flex items-center gap-2">
+    <p class="sk-crt-section-label m-0 flex-1">Jump gate · {{ gate.symbol }}</p>
+    <button
+      type="button"
+      class="sk-btn px-2 py-1 text-xs"
+      [disabled]="actionLoading('jumpgate')"
+      (click)="loadJumpGate()"
+    >
+      {{ actionLoading('jumpgate') ? '…' : 'Refresh' }}
+    </button>
+  </div>
+
+  @if (terminalShip(); as ship) {
+    @if (gate.connections.length) {
+      <p class="sk-crt-section-label">Connections</p>
+      <div class="flex flex-col gap-1">
+        @for (conn of gate.connections; track conn) {
+          <div class="sk-crt-row">
+            <span class="flex-1 truncate text-[11px]">{{ conn }}</span>
+            <button
+              type="button"
+              class="sk-btn px-2 py-1 text-xs"
+              [disabled]="actionLoading('jump-' + ship.symbol)"
+              (click)="jumpTarget.set(conn); jumpShip(ship.symbol)"
+            >
+              Jump
+            </button>
+          </div>
+        }
+      </div>
+    } @else {
+      <p class="sk-panel-meta">No connections from this gate.</p>
+    }
+  } @else {
+    <p class="sk-panel-meta">Bring a ship to this gate to jump.</p>
+  }
+} @else {
+  <button
+    type="button"
+    class="sk-btn w-full"
+    [disabled]="actionLoading('jumpgate')"
+    (click)="loadJumpGate()"
+  >
+    {{ actionLoading('jumpgate') ? '…' : 'Scan jump gate' }}
+  </button>
+}

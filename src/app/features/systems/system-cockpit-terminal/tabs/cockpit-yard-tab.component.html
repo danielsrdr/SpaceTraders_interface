@@ -1,0 +1,70 @@
+@if (shipyard(); as yard) {
+  <div class="mb-2 flex items-center gap-2">
+    <p class="sk-crt-section-label m-0 flex-1">Shipyard · {{ yard.symbol }}</p>
+    <button
+      type="button"
+      class="sk-btn px-2 py-1 text-xs"
+      [disabled]="actionLoading('shipyard')"
+      (click)="loadShipyard()"
+    >
+      {{ actionLoading('shipyard') ? '…' : 'Refresh' }}
+    </button>
+  </div>
+  <p class="sk-panel-meta">Modifications fee: {{ yard.modificationsFee }}c</p>
+
+  @if (yard.ships?.length) {
+    <div class="flex flex-col gap-1">
+      @for (s of yard.ships; track s.type) {
+        <button
+          type="button"
+          class="sk-crt-row w-full text-left"
+          [class.sk-crt-row--active]="purchaseShipType() === s.type"
+          (click)="purchaseShipType.set(s.type)"
+        >
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1">
+              <span class="truncate text-xs text-white">{{ s.name }}</span>
+              <span class="ml-auto text-[11px] text-phosphor">{{ s.purchasePrice }}c</span>
+            </div>
+            <p class="m-0 text-[10px] text-phosphor-dim">{{ s.type }}</p>
+          </div>
+        </button>
+      }
+    </div>
+  } @else {
+    <p class="sk-crt-section-label mt-2">Available types</p>
+    <div class="flex flex-col gap-1">
+      @for (t of yard.shipTypes; track t.type) {
+        <button
+          type="button"
+          class="sk-crt-row w-full text-left"
+          [class.sk-crt-row--active]="purchaseShipType() === t.type"
+          (click)="purchaseShipType.set(t.type)"
+        >
+          <span class="text-xs text-white">{{ t.type }}</span>
+        </button>
+      }
+    </div>
+    <p class="sk-panel-meta mt-1">Dock a ship here to reveal live prices.</p>
+  }
+
+  <div class="sk-panel-section">
+    <button
+      type="button"
+      class="sk-btn w-full"
+      [disabled]="!purchaseShipType() || actionLoading('purchase-direct')"
+      (click)="purchaseShipDirect()"
+    >
+      {{ actionLoading('purchase-direct') ? '…' : 'Purchase ' + (purchaseShipType() || 'ship') }}
+    </button>
+  </div>
+} @else {
+  <button
+    type="button"
+    class="sk-btn w-full"
+    [disabled]="actionLoading('shipyard')"
+    (click)="loadShipyard()"
+  >
+    {{ actionLoading('shipyard') ? '…' : 'Scan shipyard' }}
+  </button>
+}

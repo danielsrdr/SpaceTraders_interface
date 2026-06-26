@@ -146,6 +146,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   readonly ships = input<ShipData[]>([]);
   readonly systemSymbol = input('');
   readonly systemName = input('');
+  /** When embedded in the system layout grid, hide duplicate header chrome. */
+  readonly chromeMode = input<'full' | 'embedded'>('full');
   readonly focusPlanetName = input<string | null>(null);
   readonly focusShipSymbol = input<string | null>(null);
   readonly selectedShipSymbol = input<string | null>(null);

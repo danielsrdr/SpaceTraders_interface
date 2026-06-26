@@ -1,0 +1,128 @@
+@if (market(); as m) {
+  <div class="mb-2 flex items-center gap-2">
+    <p class="sk-crt-section-label m-0 flex-1">Market · {{ m.symbol }}</p>
+    <button
+      type="button"
+      class="sk-btn px-2 py-1 text-xs"
+      [disabled]="actionLoading('market')"
+      (click)="loadMarket()"
+    >
+      {{ actionLoading('market') ? '…' : 'Refresh' }}
+    </button>
+  </div>
+
+  @if (m.tradeGoods?.length) {
+    <div class="flex flex-col gap-1">
+      @for (good of m.tradeGoods; track good.symbol) {
+        <app-trade-good-row
+          [good]="good"
+          [selected]="tradeSymbol() === good.symbol"
+          [heldUnits]="cargoUnitsOf(good.symbol)"
+          [maxProceeds]="maxCargoProceeds()"
+          (pick)="tradeSymbol.set($event)"
+        />
+      }
+    </div>
+  } @else {
+    <p class="sk-panel-meta">Dock a ship here to reveal live prices.</p>
+    @if (m.exports.length) {
+      <p class="sk-crt-section-label mt-2">Exports</p>
+      <div class="flex flex-wrap gap-1">
+        @for (g of m.exports; track g.symbol) {
+          <span class="sk-crt-row px-2 py-1 text-[11px]">{{ g.symbol }}</span>
+        }
+      </div>
+    }
+    @if (m.imports.length) {
+      <p class="sk-crt-section-label mt-2">Imports</p>
+      <div class="flex flex-wrap gap-1">
+        @for (g of m.imports; track g.symbol) {
+          <span class="sk-crt-row px-2 py-1 text-[11px]">{{ g.symbol }}</span>
+        }
+      </div>
+    }
+    @if (m.exchange.length) {
+      <p class="sk-crt-section-label mt-2">Exchange</p>
+      <div class="flex flex-wrap gap-1">
+        @for (g of m.exchange; track g.symbol) {
+          <span class="sk-crt-row px-2 py-1 text-[11px]">{{ g.symbol }}</span>
+        }
+      </div>
+    }
+  }
+
+  @if (selectedPlanet(); as planet) {
+    @if (dockedAt(planet.name).length) {
+      <div class="sk-panel-section">
+        <p class="sk-crt-section-label">Trade</p>
+        <label class="sk-crt-section-label" for="m-ship">Ship</label>
+        <select
+          id="m-ship"
+          class="sk-select m-0 w-full"
+          [value]="tradeShip()"
+          (change)="tradeShip.set($any($event.target).value)"
+        >
+          <option value="">Select docked ship</option>
+          @for (s of dockedAt(planet.name); track s.symbol) {
+            <option [value]="s.symbol">{{ s.symbol }}</option>
+          }
+        </select>
+        <div class="mt-1 flex gap-1">
+          <select
+            class="sk-select m-0 flex-1"
+            [value]="tradeSymbol()"
+            (change)="tradeSymbol.set($any($event.target).value)"
+          >
+            @for (good of m.tradeGoods ?? []; track good.symbol) {
+              <option [value]="good.symbol">{{ good.symbol }}</option>
+            }
+          </select>
+          <input
+            type="number"
+            min="1"
+            class="sk-input m-0 w-16"
+            [value]="tradeUnits()"
+            (input)="tradeUnits.set(+$any($event.target).value || 1)"
+          />
+        </div>
+        <div class="sk-action-grid mt-1">
+          <button
+            type="button"
+            class="sk-btn flex-1"
+            [disabled]="actionLoading('buy-' + tradeShip())"
+            (click)="tradeCargo('buy')"
+          >
+            {{ actionLoading('buy-' + tradeShip()) ? '…' : 'Buy' }}
+          </button>
+          <button
+            type="button"
+            class="sk-btn flex-1"
+            [disabled]="actionLoading('sell-' + tradeShip())"
+            (click)="tradeCargo('sell')"
+          >
+            {{ actionLoading('sell-' + tradeShip()) ? '…' : 'Sell' }}
+          </button>
+        </div>
+        <button
+          type="button"
+          class="sk-btn mt-1 w-full text-xs"
+          [disabled]="!tradeShip() || actionLoading('cargo-' + tradeShip())"
+          (click)="loadShipCargo(tradeShip())"
+        >
+          Open cargo for margins
+        </button>
+      </div>
+    } @else {
+      <p class="sk-panel-meta mt-2 text-amber-300">Dock a ship here to trade.</p>
+    }
+  }
+} @else {
+  <button
+    type="button"
+    class="sk-btn w-full"
+    [disabled]="actionLoading('market')"
+    (click)="loadMarket()"
+  >
+    {{ actionLoading('market') ? '…' : 'Scan market' }}
+  </button>
+}

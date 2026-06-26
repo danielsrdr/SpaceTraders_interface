@@ -11,10 +11,19 @@ import { SpaceTradersApiService } from '../../services/spacetraders-api.service'
 import { TokenStorageService } from '../../services/token-storage.service';
 import { PageBackgroundService } from '../../shared/services/page-background.service';
 import { SnackbarService } from '../../shared/services/snackbar.service';
+import { ApiExplorerStore, ApiRequestRecord } from './api-explorer.store';
+import { ApiHistoryPanelComponent } from './api-history-panel.component';
+import {
+  buildAngularCall,
+  buildCurl,
+  buildFetch,
+  copyText,
+} from './api-snippet.util';
+import { JsonTreeComponent } from './json-tree.component';
 
 @Component({
   selector: 'app-api-explorer',
-  imports: [FormsModule],
+  imports: [FormsModule, ApiHistoryPanelComponent, JsonTreeComponent],
   templateUrl: './api-explorer.component.html',
 })
 export class ApiExplorerComponent implements OnInit {
@@ -23,6 +32,7 @@ export class ApiExplorerComponent implements OnInit {
   private readonly api = inject(SpaceTradersApiService);
   private readonly tokenStorage = inject(TokenStorageService);
   private readonly agentStore = inject(AgentStore);
+  readonly explorerStore = inject(ApiExplorerStore);
 
   readonly tags = API_ENDPOINT_TAGS;
   readonly allEndpoints = API_ENDPOINTS;
@@ -30,7 +40,11 @@ export class ApiExplorerComponent implements OnInit {
   readonly search = signal('');
   readonly selectedEndpoint = signal<ApiEndpointMeta | null>(null);
   readonly loadingId = signal<string | null>(null);
-  readonly responseText = signal<string>('');
+  readonly lastResult = signal<unknown>(null);
+  readonly lastStatus = signal<number | null>(null);
+  readonly lastDurationMs = signal<number | null>(null);
+  readonly responseCollapsed = signal(false);
+  readonly snippetTab = signal<'curl' | 'fetch' | 'angular'>('curl');
 
   readonly pathParamValues = signal<Record<string, string>>({});
   readonly queryParamValues = signal<Record<string, string>>({});
@@ -53,12 +67,22 @@ export class ApiExplorerComponent implements OnInit {
     return list;
   });
 
-  readonly groupedCounts = computed(() => {
-    const counts: Record<string, number> = {};
-    for (const tag of API_ENDPOINT_TAGS) {
-      counts[tag] = API_ENDPOINTS.filter((e) => e.tag === tag).length;
+  readonly activeRecord = computed(() => this.explorerStore.selectedRecord());
+
+  readonly snippetText = computed(() => {
+    const record = this.activeRecord();
+    if (!record) return '';
+    const token = this.tokenStorage.getToken();
+    switch (this.snippetTab()) {
+      case 'curl':
+        return buildCurl(record, token);
+      case 'fetch':
+        return buildFetch(record, token);
+      case 'angular':
+        return buildAngularCall(record);
+      default:
+        return '';
     }
-    return counts;
   });
 
   ngOnInit(): void {
@@ -99,12 +123,12 @@ export class ApiExplorerComponent implements OnInit {
   selectTag(tag: string): void {
     this.selectedTag.set(tag);
     this.selectedEndpoint.set(null);
-    this.responseText.set('');
+    this.clearResponse();
   }
 
   selectEndpoint(endpoint: ApiEndpointMeta): void {
     this.selectedEndpoint.set(endpoint);
-    this.responseText.set('');
+    this.clearResponse();
 
     const agent = this.agentStore.agent();
     const pathDefaults: Record<string, string> = {};
@@ -134,6 +158,22 @@ export class ApiExplorerComponent implements OnInit {
     this.queryParamValues.update((current) => ({ ...current, [name]: value }));
   }
 
+  replayRecord(record: ApiRequestRecord): void {
+    const endpoint = API_ENDPOINTS.find((e) => this.endpointKey(e) === record.endpointKey);
+    if (!endpoint) {
+      this.snackbar.show('Endpoint no longer in catalog', 'warning');
+      return;
+    }
+    this.selectedEndpoint.set(endpoint);
+    this.pathParamValues.set({ ...record.pathParams });
+    this.queryParamValues.set({ ...record.query });
+    this.bodyText.set(record.body != null ? JSON.stringify(record.body, null, 2) : '{}');
+    this.lastResult.set(record.response);
+    this.lastStatus.set(record.status);
+    this.lastDurationMs.set(record.durationMs);
+    this.explorerStore.select(record.id);
+  }
+
   async tryEndpoint(endpoint: ApiEndpointMeta): Promise<void> {
     const key = this.endpointKey(endpoint);
     this.loadingId.set(key);
@@ -152,21 +192,65 @@ export class ApiExplorerComponent implements OnInit {
         body = raw ? JSON.parse(raw) : {};
       }
 
-      const data = await this.api.callEndpoint(endpoint, {
+      const result = await this.api.callEndpoint(endpoint, {
         pathParams: this.pathParamValues(),
         query: this.queryParamValues(),
         body,
       });
 
-      this.responseText.set(JSON.stringify({ data }, null, 2));
+      this.lastResult.set(result.data);
+      this.lastStatus.set(result.status);
+      this.lastDurationMs.set(result.durationMs);
+
+      this.explorerStore.add({
+        timestamp: Date.now(),
+        endpointKey: key,
+        method: endpoint.method,
+        path: endpoint.path,
+        operationId: endpoint.operationId,
+        pathParams: { ...this.pathParamValues() },
+        query: { ...this.queryParamValues() },
+        body,
+        status: result.status,
+        durationMs: result.durationMs,
+        response: result.data,
+        error: result.status >= 400 ? String((result.data as { error?: string })?.error ?? 'Error') : undefined,
+      });
+
+      if (result.status >= 400) {
+        this.snackbar.show('Request failed — see response', 'error');
+      }
     } catch (error) {
-      const err = error as Error & { status?: number };
-      this.responseText.set(
-        JSON.stringify({ status: err.status, error: err.message ?? 'Request failed' }, null, 2),
-      );
-      this.snackbar.show(err.message ?? 'Request failed', 'error');
+      const message = error instanceof Error ? error.message : 'Request failed';
+      this.lastResult.set({ error: message });
+      this.lastStatus.set(0);
+      this.snackbar.show(message, 'error');
     } finally {
       this.loadingId.set(null);
     }
+  }
+
+  async copyResponse(): Promise<void> {
+    const text = JSON.stringify(this.lastResult(), null, 2);
+    if (await copyText(text)) {
+      this.snackbar.show('Response copied', 'success');
+    }
+  }
+
+  async copySnippet(): Promise<void> {
+    if (await copyText(this.snippetText())) {
+      this.snackbar.show('Snippet copied', 'success');
+    }
+  }
+
+  clearHistory(): void {
+    this.explorerStore.clearHistory();
+    this.clearResponse();
+  }
+
+  private clearResponse(): void {
+    this.lastResult.set(null);
+    this.lastStatus.set(null);
+    this.lastDurationMs.set(null);
   }
 }

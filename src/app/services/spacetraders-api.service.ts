@@ -35,6 +35,12 @@ export interface CallEndpointOptions {
   body?: unknown;
 }
 
+export interface CallEndpointResult {
+  data: unknown;
+  status: number;
+  durationMs: number;
+}
+
 interface RequestOptions {
   method?: string;
   body?: unknown;
@@ -735,7 +741,7 @@ export class SpaceTradersApiService {
     if (path.includes('/market')) this.cache.invalidate('markets');
   }
 
-  async callEndpoint(endpoint: ApiEndpointMeta, options: CallEndpointOptions = {}): Promise<unknown> {
+  async callEndpoint(endpoint: ApiEndpointMeta, options: CallEndpointOptions = {}): Promise<CallEndpointResult> {
     let path = this.resolveEndpointPath(endpoint.path, options.pathParams ?? {});
     if (options.query) {
       const qs = Object.entries(options.query)
@@ -751,11 +757,22 @@ export class SpaceTradersApiService {
     }
 
     const needsBody = ['POST', 'PATCH', 'PUT'].includes(method);
-    return this.request(path, {
-      method,
-      body: needsBody ? (options.body ?? {}) : undefined,
-      requiresAuth: endpoint.requiresAuth,
-    });
+    const started = performance.now();
+    try {
+      const data = await this.request(path, {
+        method,
+        body: needsBody ? (options.body ?? {}) : undefined,
+        requiresAuth: endpoint.requiresAuth,
+      });
+      return { data, status: 200, durationMs: Math.round(performance.now() - started) };
+    } catch (error) {
+      const err = error as Error & { status?: number };
+      return {
+        data: { error: err.message },
+        status: err.status ?? 0,
+        durationMs: Math.round(performance.now() - started),
+      };
+    }
   }
 
   clearCaches(): void {

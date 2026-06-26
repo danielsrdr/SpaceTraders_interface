@@ -35,6 +35,7 @@ const REFINE_GOODS = [
   selector: 'app-ships',
   imports: [FormsModule, ShipViewer3dComponent, FleetCompareComponent],
   templateUrl: './ships.component.html',
+  host: { class: 'block h-full min-h-0' },
 })
 export class ShipsComponent implements OnInit {
   private readonly api = inject(SpaceTradersApiService);

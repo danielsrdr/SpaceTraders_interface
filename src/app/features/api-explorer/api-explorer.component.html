@@ -1,7 +1,6 @@
-<p class="sk-title">API</p>
 
-<div class="sk-page-center px-4 py-16">
-  <div class="mx-auto grid h-[70vh] w-full max-w-6xl gap-4 md:grid-cols-[240px_1fr]">
+<div class="sk-page-center px-4 py-6">
+  <div class="mx-auto grid h-[70vh] w-full max-w-7xl gap-4 md:grid-cols-[220px_minmax(0,1fr)_240px]">
     <aside class="sk-panel flex flex-col overflow-hidden">
       <p class="sk-panel-heading text-sm">Categories</p>
       <input
@@ -108,22 +107,95 @@
             </div>
           }
 
-          <button
-            type="button"
-            class="sk-btn mt-2"
-            [disabled]="loadingId() === endpointKey(endpoint)"
-            (click)="tryEndpoint(endpoint)"
-          >
-            {{ loadingId() === endpointKey(endpoint) ? 'Sending…' : 'Try request' }}
-          </button>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              class="sk-btn"
+              [disabled]="loadingId() === endpointKey(endpoint)"
+              (click)="tryEndpoint(endpoint)"
+            >
+              {{ loadingId() === endpointKey(endpoint) ? 'Sending…' : 'Try request' }}
+            </button>
+            @if (activeRecord()) {
+              <button type="button" class="sk-btn" (click)="tryEndpoint(endpoint)">Replay</button>
+            }
+          </div>
 
-          @if (responseText()) {
-            <pre class="mt-3 max-h-48 overflow-auto rounded bg-black/80 p-2 text-left text-xs text-green-200">{{
-              responseText()
-            }}</pre>
+          @if (lastResult() !== null) {
+            <div class="mt-3 rounded border border-white/10 bg-black/50 p-2">
+              <div class="mb-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  class="sk-btn px-2 py-0.5 text-[10px]"
+                  (click)="responseCollapsed.update((v) => !v)"
+                >
+                  {{ responseCollapsed() ? 'Expand' : 'Collapse' }}
+                </button>
+                <button type="button" class="sk-btn px-2 py-0.5 text-[10px]" (click)="copyResponse()">
+                  Copy response
+                </button>
+                @if (lastStatus() !== null) {
+                  <span class="text-xs" [class.text-emerald-300]="lastStatus()! >= 200 && lastStatus()! < 300">
+                    HTTP {{ lastStatus() }}
+                  </span>
+                }
+                @if (lastDurationMs() !== null) {
+                  <span class="text-xs text-white/45">{{ lastDurationMs() }}ms</span>
+                }
+              </div>
+              @if (!responseCollapsed()) {
+                <app-json-tree [data]="lastResult()" />
+              }
+            </div>
+          }
+
+          @if (activeRecord(); as record) {
+            <div class="mt-3 sk-panel-section">
+              <p class="sk-panel-heading text-xs">Snippets</p>
+              <div class="mb-2 flex gap-1">
+                <button
+                  type="button"
+                  class="sk-btn text-xs"
+                  [class.!bg-white]="snippetTab() === 'curl'"
+                  [class.!text-black]="snippetTab() === 'curl'"
+                  (click)="snippetTab.set('curl')"
+                >
+                  curl
+                </button>
+                <button
+                  type="button"
+                  class="sk-btn text-xs"
+                  [class.!bg-white]="snippetTab() === 'fetch'"
+                  [class.!text-black]="snippetTab() === 'fetch'"
+                  (click)="snippetTab.set('fetch')"
+                >
+                  fetch
+                </button>
+                <button
+                  type="button"
+                  class="sk-btn text-xs"
+                  [class.!bg-white]="snippetTab() === 'angular'"
+                  [class.!text-black]="snippetTab() === 'angular'"
+                  (click)="snippetTab.set('angular')"
+                >
+                  Angular
+                </button>
+                <button type="button" class="sk-btn ml-auto text-xs" (click)="copySnippet()">Copy</button>
+              </div>
+              <pre class="max-h-40 overflow-auto rounded bg-black/80 p-2 text-left text-[10px] text-green-200/90">{{
+                snippetText()
+              }}</pre>
+            </div>
           }
         </div>
       }
     </main>
+
+    <app-api-history-panel
+      [history]="explorerStore.history()"
+      [selectedId]="explorerStore.selectedId()"
+      (select)="replayRecord($event)"
+      (clear)="clearHistory()"
+    />
   </div>
 </div>

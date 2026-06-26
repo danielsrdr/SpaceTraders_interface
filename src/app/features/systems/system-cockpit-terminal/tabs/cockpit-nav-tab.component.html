@@ -1,0 +1,186 @@
+@if (terminalShip(); as ship) {
+  <p class="sk-crt-section-label">Flight ops · {{ ship.symbol }}</p>
+  <div class="sk-crt-row mb-2">
+    <span class="sk-ship-badge" [class]="shipStatusClass(ship.nav.status)">{{
+      ship.nav.status
+    }}</span>
+    <span class="text-xs">Fuel {{ ship.fuel.current }}/{{ ship.fuel.capacity }}</span>
+    <span class="sk-ship-badge ml-auto" [class]="shipFlightModeClass(ship.nav.flightMode)">{{
+      ship.nav.flightMode
+    }}</span>
+  </div>
+
+  <label class="sk-crt-section-label" for="nav-mode">Flight mode</label>
+  <div class="flex gap-1">
+    <select
+      id="nav-mode"
+      class="sk-select m-0 flex-1"
+      [value]="flightMode()"
+      (change)="flightMode.set($any($event.target).value)"
+    >
+      @for (mode of flightModes; track mode) {
+        <option [value]="mode">{{ mode }}</option>
+      }
+    </select>
+    <button
+      type="button"
+      class="sk-btn"
+      [disabled]="actionLoading('flight-' + ship.symbol)"
+      (click)="setFlightMode(ship.symbol)"
+    >
+      Set
+    </button>
+  </div>
+  <p class="sk-panel-meta mt-1">{{ flightModeDescription(flightMode()) }}</p>
+
+  <div class="sk-action-grid mt-3">
+    @if (shipDocked(ship)) {
+      <button
+        type="button"
+        class="sk-btn"
+        [disabled]="actionLoading('orbit-' + ship.symbol)"
+        (click)="orbitShip(ship.symbol)"
+      >
+        Orbit
+      </button>
+    } @else if (shipInOrbit(ship)) {
+      <button
+        type="button"
+        class="sk-btn"
+        [disabled]="actionLoading('dock-' + ship.symbol)"
+        (click)="dockShip(ship.symbol)"
+      >
+        Dock
+      </button>
+    }
+    <button
+      type="button"
+      class="sk-btn"
+      [disabled]="actionLoading('chart-' + ship.symbol)"
+      (click)="chartShip(ship.symbol)"
+    >
+      Chart
+    </button>
+  </div>
+
+  <div class="sk-panel-section">
+    <label class="sk-crt-section-label" for="nav-refuel">Refuel (units)</label>
+    <div class="flex gap-1">
+      <input
+        id="nav-refuel"
+        type="number"
+        min="1"
+        class="sk-input m-0 w-20"
+        [value]="refuelUnits()"
+        (input)="refuelUnits.set(+$any($event.target).value || 1)"
+      />
+      <button
+        type="button"
+        class="sk-btn flex-1"
+        [disabled]="actionLoading('refuel-' + ship.symbol)"
+        (click)="refuelShipSymbol.set(ship.symbol); refuelShipAction()"
+      >
+        Refuel
+      </button>
+    </div>
+  </div>
+} @else {
+  <p class="sk-panel-meta">No ship here. Select a ship to access flight controls.</p>
+}
+
+@if (selectedPlanet(); as planet) {
+  <div class="sk-panel-section">
+    <p class="sk-crt-section-label">Destination · {{ planet.name }}</p>
+    <button type="button" class="sk-btn w-full" (click)="openTravel()(planet, 'visit')">
+      Plot course
+    </button>
+    @if (shipsThatCanNavigate(planet).length) {
+      <p class="sk-crt-section-label mt-3">Quick move</p>
+      @for (s of shipsThatCanNavigate(planet); track s.symbol) {
+        <div class="sk-crt-row mb-1">
+          <span class="flex-1 truncate text-xs">{{ s.symbol }}</span>
+          <button
+            type="button"
+            class="sk-btn px-2 py-1 text-xs"
+            [disabled]="actionLoading('nav-' + s.symbol)"
+            (click)="navigateShip(s.symbol)"
+          >
+            Nav
+          </button>
+          <button
+            type="button"
+            class="sk-btn px-2 py-1 text-xs"
+            [disabled]="actionLoading('warp-' + s.symbol)"
+            (click)="warpShip(s.symbol)"
+          >
+            Warp
+          </button>
+        </div>
+      }
+    }
+
+    @if (planet.isUnderConstruction) {
+      <div class="sk-panel-section">
+        <p class="sk-crt-section-label">Construction site</p>
+        <button
+          type="button"
+          class="sk-btn w-full"
+          [disabled]="actionLoading('construction')"
+          (click)="loadConstruction()"
+        >
+          {{ actionLoading('construction') ? '…' : 'Load site' }}
+        </button>
+        @if (construction(); as site) {
+          <ul class="mt-2 list-none p-0 text-xs">
+            @for (m of site.materials; track m.tradeSymbol) {
+              <li class="flex items-center gap-2 py-0.5">
+                <span class="flex-1 truncate">{{ m.tradeSymbol }}</span>
+                <span class="text-phosphor-dim">{{ m.fulfilled }}/{{ m.required }}</span>
+              </li>
+            }
+          </ul>
+          @if (!site.isComplete) {
+            <label class="sk-crt-section-label mt-2" for="supply-ship">Supply ship</label>
+            <select
+              id="supply-ship"
+              class="sk-select m-0 w-full"
+              [value]="supplyShip()"
+              (change)="supplyShip.set($any($event.target).value)"
+            >
+              <option value="">Select docked ship</option>
+              @for (s of dockedAt(planet.name); track s.symbol) {
+                <option [value]="s.symbol">{{ s.symbol }}</option>
+              }
+            </select>
+            <div class="mt-1 flex gap-1">
+              <select
+                class="sk-select m-0 flex-1"
+                [value]="supplyMaterial()"
+                (change)="supplyMaterial.set($any($event.target).value)"
+              >
+                @for (m of site.materials; track m.tradeSymbol) {
+                  <option [value]="m.tradeSymbol">{{ m.tradeSymbol }}</option>
+                }
+              </select>
+              <input
+                type="number"
+                min="1"
+                class="sk-input m-0 w-16"
+                [value]="supplyUnits()"
+                (input)="supplyUnits.set(+$any($event.target).value || 1)"
+              />
+            </div>
+            <button
+              type="button"
+              class="sk-btn mt-1 w-full"
+              [disabled]="actionLoading('supply')"
+              (click)="supplyConstruction()"
+            >
+              Supply materials
+            </button>
+          }
+        }
+      </div>
+    }
+  </div>
+}

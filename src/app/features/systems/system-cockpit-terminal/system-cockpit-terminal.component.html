@@ -1,0 +1,67 @@
+<aside class="sk-crt sk-system-terminal flex h-full min-h-0 flex-col">
+  <div class="sk-crt-titlebar shrink-0">
+    <span class="sk-crt-led" [class.sk-crt-led--busy]="!!loadingAction()"></span>
+    <div class="min-w-0 flex-1">
+      <p class="m-0 truncate font-display text-sm tracking-widest text-white uppercase">
+        {{ terminalTitle() }}
+      </p>
+      <p class="m-0 truncate text-[10px] text-phosphor-dim">{{ terminalSubtitle() }}</p>
+    </div>
+    <button
+      type="button"
+      class="sk-btn px-2 py-1 text-xs"
+      aria-label="Close terminal"
+      (click)="onClose()"
+    >
+      <svg
+        class="h-3 w-3"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="3"
+        stroke-linecap="round"
+        aria-hidden="true"
+      >
+        <path d="M6 6l12 12M18 6L6 18" />
+      </svg>
+    </button>
+  </div>
+
+  <nav class="sk-crt-tabs shrink-0" role="tablist">
+    @for (tab of cockpitTabs; track tab.id) {
+      <button
+        type="button"
+        role="tab"
+        class="sk-crt-tab"
+        [class.sk-crt-tab--active]="cockpitTab() === tab.id"
+        [attr.aria-selected]="cockpitTab() === tab.id"
+        [disabled]="!isTabEnabled(tab.id)"
+        (click)="selectTab(tab.id)"
+      >
+        {{ tab.label }}
+      </button>
+    }
+  </nav>
+
+  <div class="sk-crt-body min-h-0 flex-1 overflow-y-auto">
+    @if (activeTabComponent(); as tabComponent) {
+      <ng-container *ngComponentOutlet="tabComponent; inputs: tabInputs()" />
+    }
+  </div>
+
+  <div class="sk-system-terminal-footer shrink-0 border-t border-white/10">
+    <div class="sk-crt-log" aria-live="polite">
+      @for (line of logLinesReversed(); track line.id) {
+        <p
+          class="sk-log-line"
+          [class.sk-log-line--error]="line.tone === 'error'"
+          [class.sk-log-line--info]="line.tone === 'info'"
+        >
+          &gt; {{ line.text }}
+        </p>
+      } @empty {
+        <p class="sk-log-line sk-log-line--info">&gt; awaiting command…</p>
+      }
+    </div>
+  </div>
+</aside>

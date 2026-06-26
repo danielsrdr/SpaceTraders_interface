@@ -4,8 +4,11 @@ import { AgentStore } from '../../core/state/agent.store';
 import { AnalyticsStore } from '../../core/state/analytics.store';
 import { DiscoveryStore } from '../../core/state/discovery.store';
 import { FleetStore } from '../../core/state/fleet.store';
+import { PeriodDeltaComponent } from '../../shared/components/charts/period-delta.component';
+import { SparklineComponent } from '../../shared/components/charts/sparkline.component';
 import { NavActivityService } from '../../shared/services/nav-activity.service';
 import { PageBackgroundService } from '../../shared/services/page-background.service';
+import { exportToCsv } from '../../shared/utils/csv-export.util';
 import { Achievement, ACHIEVEMENT_BY_ID } from '../codex/achievements';
 import { AchievementsService } from '../codex/achievements.service';
 import { CodexThumbnailService } from '../codex/codex-thumbnail.service';
@@ -23,6 +26,7 @@ interface ChartBar {
   height: number;
   gross: number;
   net: number;
+  prevGross: number;
   start: number;
 }
 
@@ -39,6 +43,7 @@ const BUCKETS = 24;
 
 @Component({
   selector: 'app-dashboard',
+  imports: [SparklineComponent, PeriodDeltaComponent],
   templateUrl: './dashboard.component.html',
 })
 export class DashboardComponent implements OnInit, OnDestroy {
@@ -55,6 +60,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly windows = WINDOWS;
   readonly windowHours = signal(24);
   readonly hovered = signal<number | null>(null);
+  readonly chartSeries = signal<'gross' | 'net'>('gross');
+  readonly exportOpen = signal(false);
 
   private readonly now = signal(Date.now());
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -66,19 +73,58 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly netCredits = computed(() => this.analytics.netCredits(this.windowHours(), this.now()));
   readonly fuelBurned = computed(() => this.analytics.fuelBurned(this.windowHours(), this.now()));
 
+  readonly netComparison = computed(() => this.analytics.compareNetCredits(this.windowHours(), this.now()));
+  readonly revenueComparison = computed(() =>
+    this.analytics.compareRevenuePerHour(this.windowHours(), this.now()),
+  );
+  readonly fuelComparison = computed(() => this.analytics.compareFuelBurned(this.windowHours(), this.now()));
+
   readonly topRoutes = computed(() => this.analytics.topRoutes(6, this.windowHours(), this.now()));
   readonly maxRouteCount = computed(() => Math.max(1, ...this.topRoutes().map((r) => r.count)));
 
   readonly fuelByShip = computed(() => this.analytics.fuelByShip(this.windowHours(), this.now()).slice(0, 6));
   readonly maxShipFuel = computed(() => Math.max(1, ...this.fuelByShip().map((s) => s.fuel)));
 
+  readonly fuelSparklines = computed(() => {
+    const ships = this.fuelByShip();
+    const buckets = this.analytics.fuelBuckets(this.windowHours(), 12, this.now());
+    return ships.map((s) => {
+      const shipEvents = this.analytics.events().filter(
+        (e) => e.ship === s.ship && e.kind === 'navigate' && e.fuel != null,
+      );
+      const values = this.analytics
+        .fuelBuckets(this.windowHours(), 12, this.now())
+        .map((_, i) => {
+          const span = Math.max(1, this.windowHours()) * 3_600_000;
+          const start = this.now() - span;
+          const size = span / 12;
+          let fuel = 0;
+          for (const e of shipEvents) {
+            let idx = Math.floor((e.t - start) / size);
+            if (idx === i) fuel += e.fuel ?? 0;
+          }
+          return fuel;
+        });
+      void buckets;
+      return { ship: s.ship, fuel: s.fuel, sparkline: values };
+    });
+  });
+
   readonly chart = computed(() => {
     const buckets = this.analytics.revenueBuckets(this.windowHours(), BUCKETS, this.now());
-    const max = Math.max(1, ...buckets.map((b) => b.gross));
+    const prevEnd = this.now() - this.windowHours() * 3_600_000;
+    const prevBuckets = this.analytics.revenueBuckets(this.windowHours(), BUCKETS, prevEnd);
+    const series = this.chartSeries();
+    const max = Math.max(
+      1,
+      ...buckets.map((b) => (series === 'gross' ? b.gross : Math.abs(b.net))),
+      ...prevBuckets.map((b) => b.gross * 0.3),
+    );
     const gap = 3;
     const barWidth = (CHART_WIDTH - gap * (buckets.length - 1)) / buckets.length;
     const bars: ChartBar[] = buckets.map((bucket, index) => {
-      const height = (bucket.gross / max) * CHART_HEIGHT;
+      const value = series === 'gross' ? bucket.gross : Math.max(0, bucket.net);
+      const height = (value / max) * CHART_HEIGHT;
       return {
         index,
         x: index * (barWidth + gap),
@@ -87,6 +133,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         height,
         gross: bucket.gross,
         net: bucket.net,
+        prevGross: prevBuckets[index]?.gross ?? 0,
         start: bucket.start,
       };
     });
@@ -153,6 +200,48 @@ export class DashboardComponent implements OnInit, OnDestroy {
   setWindow(hours: number): void {
     this.windowHours.set(hours);
     this.hovered.set(null);
+  }
+
+  toggleExport(): void {
+    this.exportOpen.update((v) => !v);
+  }
+
+  exportCsv(kind: 'events' | 'buckets' | 'routes' | 'fuel'): void {
+    const now = this.now();
+    const hours = this.windowHours();
+    const stamp = new Date(now).toISOString().slice(0, 10);
+    switch (kind) {
+      case 'events': {
+        const cutoff = hours > 0 ? now - hours * 3_600_000 : -Infinity;
+        const rows = this.analytics.events().filter((e) => e.t >= cutoff && e.t <= now);
+        exportToCsv(`analytics-events-${stamp}.csv`, rows as unknown as Record<string, unknown>[]);
+        break;
+      }
+      case 'buckets': {
+        const rows = this.analytics.revenueBuckets(hours, BUCKETS, now);
+        exportToCsv(`analytics-buckets-${stamp}.csv`, rows as unknown as Record<string, unknown>[]);
+        break;
+      }
+      case 'routes': {
+        exportToCsv(
+          `analytics-routes-${stamp}.csv`,
+          this.analytics.topRoutes(50, hours, now) as unknown as Record<string, unknown>[],
+        );
+        break;
+      }
+      case 'fuel': {
+        exportToCsv(
+          `analytics-fuel-${stamp}.csv`,
+          this.analytics.fuelByShip(hours, now) as unknown as Record<string, unknown>[],
+        );
+        break;
+      }
+      default: {
+        const _exhaustive: never = kind;
+        void _exhaustive;
+      }
+    }
+    this.exportOpen.set(false);
   }
 
   formatCredits(value: number): string {
