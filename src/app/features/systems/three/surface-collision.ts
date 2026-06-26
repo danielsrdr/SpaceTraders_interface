@@ -1,6 +1,8 @@
 import { InstancedMesh, Mesh, Object3D } from 'three';
 import { TerrainHeightField, WORLD_RADIUS } from './terrain/terrain-height';
 import { MineTunnelManager } from './mine/mine-tunnel.manager';
+import type { CaveConfig, CaveTunnelManager } from './cave/cave-tunnel.manager';
+import { createCaveTunnelManager } from './cave/cave-tunnel.manager';
 import type { SurfaceColliderRegistry } from './surface-collider-registry';
 
 const PLAYER_RADIUS = 0.35;
@@ -30,6 +32,7 @@ export function createSurfaceCollision(
   heightField: TerrainHeightField,
   tunnels: MineTunnelManager | null,
   colliders: SurfaceColliderRegistry | null = null,
+  caveTunnels: CaveTunnelManager | null = null,
 ): SurfaceCollision {
   return {
     getGroundHeight(x: number, z: number): number {
@@ -44,6 +47,10 @@ export function createSurfaceCollision(
 
       if (tunnels && y < heightField.getPitFloorY() + 2) {
         if (tunnels.isSolidBlock(x, y, z)) return true;
+      }
+
+      if (caveTunnels && caveTunnels.isInNetworkBounds(x, z) && y < caveTunnels.config.floorY + 4) {
+        if (caveTunnels.isSolidBlock(x, y, z)) return true;
       }
 
       const ground = heightField.getHeight(x, z);
@@ -71,6 +78,41 @@ export function createSurfaceCollision(
 
     ceilingHeight(x: number, z: number, radius: number, aboveY: number): number {
       return colliders ? colliders.minCeilingBase(x, z, radius, aboveY) : Infinity;
+    },
+  };
+}
+
+/** Flat-floor collision for the underground cave interior view. */
+export function createCaveInteriorCollision(caveTunnels: CaveTunnelManager): SurfaceCollision {
+  const floorY = caveTunnels.config.floorY + 0.05;
+  return {
+    getGroundHeight(): number {
+      return floorY;
+    },
+
+    isSolid(x: number, y: number, z: number): boolean {
+      if (!caveTunnels.isInNetworkBounds(x, z)) {
+        return y < floorY - 2;
+      }
+      return caveTunnels.isSolidBlock(x, y, z);
+    },
+
+    blocksCapsuleBody(): boolean {
+      return false;
+    },
+
+    supportHeight(_x: number, _z: number, _radius: number, maxTopY: number): number {
+      return maxTopY >= floorY ? floorY : -Infinity;
+    },
+
+    ceilingHeight(x: number, z: number, _radius: number, aboveY: number): number {
+      for (let dy = 0; dy <= 4; dy++) {
+        const testY = aboveY + dy;
+        if (caveTunnels.isSolidBlock(x, testY, z)) {
+          return testY;
+        }
+      }
+      return Infinity;
     },
   };
 }

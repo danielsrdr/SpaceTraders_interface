@@ -26,7 +26,7 @@ interface PoiRule {
 const POI_RULES: PoiRule[] = [
   {
     kind: 'market',
-    label: 'Market',
+    label: 'Trading Post',
     priority: 80,
     matches: (p) => hasTrait(p, 'MARKETPLACE'),
     position: (seed) => ({

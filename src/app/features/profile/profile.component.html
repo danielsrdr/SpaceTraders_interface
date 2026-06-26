@@ -18,7 +18,7 @@
         <p class="p-1.5 text-center">{{ a.ships_cpt }}</p>
       </div>
     }
-    <div class="flex w-4/5 items-center gap-3">
+    <div class="flex w-4/5 flex-wrap items-center gap-3">
       <button
         type="button"
         class="h-[50px] w-[50px] border-none bg-transparent p-0"
@@ -27,6 +27,16 @@
         <img src="/assets/menu/logout.png" alt="Logout" class="h-full w-full" />
       </button>
       <button type="button" class="sk-btn" (click)="copyToken()">COPY TOKEN</button>
+      <label class="flex cursor-pointer items-center gap-2 text-xs text-white/80">
+        <input
+          type="checkbox"
+          class="accent-[var(--color-accent)]"
+          [checked]="factionTheme.enabled()"
+          (change)="toggleFactionTheme($event)"
+        />
+        Faction theme
+      </label>
+      <button type="button" class="sk-btn text-xs" (click)="replayTour()">REPLAY TOUR</button>
     </div>
   </div>
 </div>

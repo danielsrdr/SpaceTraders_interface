@@ -31,6 +31,10 @@ export interface GameStatus {
   };
   serverResets?: { next: string; frequency: string };
   announcements?: Array<{ title: string; body: string }>;
+  leaderboards?: {
+    mostCredits?: Array<{ agentSymbol: string; credits: number }>;
+    mostSubmittedCharts?: Array<{ agentSymbol: string; chartCount: number }>;
+  };
 }
 
 export interface SupplyChainData {

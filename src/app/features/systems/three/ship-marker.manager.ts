@@ -24,6 +24,11 @@ const BLIP_DOCKED_COLOR = 0x38bdf8;
 const BLIP_ORBIT_COLOR = 0x7dd3fc;
 const BLIP_TRANSIT_COLOR = 0x5eead4;
 
+export interface MarkerStyleOptions {
+  ghost?: boolean;
+  blipColorForShip?: (ship: ShipData) => number;
+}
+
 interface StationaryShipMarkerData {
   kind: 'docked' | 'orbit';
   ship: ShipData;
@@ -70,9 +75,9 @@ export class ShipMarkerManager {
   private readonly destScratch = new Vector3();
   private readonly dynamics = new ShipDynamicsEngine();
 
-  constructor() {
-    this.markers.name = 'ship-markers';
-    this.blips.name = 'ship-blips';
+  constructor(private readonly style: MarkerStyleOptions = {}) {
+    this.markers.name = style.ghost ? 'ghost-ship-markers' : 'ship-markers';
+    this.blips.name = style.ghost ? 'ghost-ship-blips' : 'ship-blips';
   }
 
   get dynamicsEngine(): ShipDynamicsEngine {
@@ -118,7 +123,7 @@ export class ShipMarkerManager {
         } satisfies StationaryShipMarkerData;
         const blip = this.createShipBlip(
           Math.max(2.5, entry.radius * 0.5),
-          inOrbit ? BLIP_ORBIT_COLOR : BLIP_DOCKED_COLOR,
+          this.resolveBlipColor(ship, inOrbit ? BLIP_ORBIT_COLOR : BLIP_DOCKED_COLOR),
         );
         marker.userData['blip'] = blip;
         this.blips.add(blip);
@@ -142,7 +147,7 @@ export class ShipMarkerManager {
         destSymbol: route.destination.symbol,
       } satisfies TransitShipMarkerData;
       marker.userData['ship'] = ship;
-      const blip = this.createShipBlip(Math.max(2.5, originPlanet.radius * 0.5), BLIP_TRANSIT_COLOR);
+      const blip = this.createShipBlip(Math.max(2.5, originPlanet.radius * 0.5), this.resolveBlipColor(ship, BLIP_TRANSIT_COLOR));
       marker.userData['blip'] = blip;
       this.blips.add(blip);
       this.markers.add(marker);
@@ -210,6 +215,7 @@ export class ShipMarkerManager {
 
   /** Breathe the hulls and ping-expand the blips. */
   animate(elapsed: number): void {
+    if (this.style.ghost) return;
     for (const child of this.markers.children) {
       const baseScale = child.userData['baseScale'] as number | undefined;
       const phase = (child.userData['pulsePhase'] as number | undefined) ?? 0;
@@ -239,7 +245,29 @@ export class ShipMarkerManager {
     marker.userData['ship'] = ship;
     marker.userData['baseScale'] = finalScale;
     marker.userData['pulsePhase'] = markerPulsePhase(ship.symbol);
+    if (this.style.ghost) {
+      marker.traverse((obj) => {
+        const mesh = obj as Mesh;
+        if (!mesh.isMesh) return;
+        const mat = mesh.material;
+        if (Array.isArray(mat)) {
+          mat.forEach((m) => {
+            if ('opacity' in m) {
+              m.transparent = true;
+              m.opacity = 0.35;
+            }
+          });
+        } else if (mat && 'opacity' in mat) {
+          mat.transparent = true;
+          mat.opacity = 0.35;
+        }
+      });
+    }
     return marker;
+  }
+
+  private resolveBlipColor(ship: ShipData, fallback: number): number {
+    return this.style.blipColorForShip?.(ship) ?? fallback;
   }
 
   private shipMarkerScaleForRole(role: string, baseScale: number): number {
@@ -253,7 +281,7 @@ export class ShipMarkerManager {
       new MeshBasicMaterial({
         color,
         transparent: true,
-        opacity: 0.5,
+        opacity: this.style.ghost ? 0.25 : 0.5,
         depthWrite: false,
       }),
     );

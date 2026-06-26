@@ -15,20 +15,22 @@ import { createMineCart, MineCart } from './mine/mine-cart';
 import { buildSurfaceProps } from './surface-props.builder';
 import { buildSurfacePoiConfig } from './surface-poi';
 import { buildSurfaceZones, SurfaceZone } from './surface-zones';
-import { createSurfaceCollision, SurfaceCollision } from './surface-collision';
+import { createCaveInteriorCollision, createSurfaceCollision, SurfaceCollision } from './surface-collision';
 import {
   createSurfaceColliderRegistry,
   SurfaceColliderRegistry,
 } from './surface-collider-registry';
-import { buildMarketStructuresAt, MarketStallAnchor } from './zone-buildings.builder';
+import { buildMarketStructuresAt, type MarketClerkAnchor } from './zone-buildings.builder';
 import { buildShipyardStructuresAt } from './zone-shipyard.builder';
 import { buildRuinsStructuresAt } from './zone-ruins.builder';
 import { buildDepotStructuresAt } from './zone-depot.builder';
 import { buildSiphonPlatformAt } from './zone-siphon.builder';
 import { buildCaveStructuresAt } from './zone-cave.builder';
+import { createCaveTunnelManager, type CaveConfig, type CaveTunnelManager } from './cave/cave-tunnel.manager';
 import { createTerrainHeightField, TerrainHeightField } from './terrain/terrain-height';
 import { applyTerrainProfile } from './terrain/terrain-material';
 import { createTerrainChunkManager, TerrainChunkManager } from './terrain/terrain-chunk.manager';
+import { buildSurfaceFauna, type SurfaceFaunaResult } from './surface-fauna.builder';
 import type { SurfaceTraitProfile } from './surface-trait-profile';
 import type { SurfaceZoneKind } from './system-view-mode';
 import type { SurfacePoiDefinition } from './surface-poi-registry';
@@ -54,15 +56,20 @@ export interface SurfaceWorldResult {
   heightField: TerrainHeightField;
   terrainManager: TerrainChunkManager;
   tunnels: MineTunnelManager | null;
+  caveTunnels: CaveTunnelManager | null;
+  caveConfig: CaveConfig | null;
+  caveCollision: SurfaceCollision | null;
   cart: MineCart | null;
   collision: SurfaceCollision;
   colliders: SurfaceColliderRegistry;
   zones: SurfaceZone[];
   poiAnchors: SurfacePoiAnchor[];
   pois: SurfacePoiDefinition[];
-  marketStalls: MarketStallAnchor[];
+  marketClerk: MarketClerkAnchor | null;
   marketOrigin: { x: number; z: number; baseY: number } | null;
   shipyardOrigin: { x: number; z: number; baseY: number } | null;
+  caveMouth: { x: number; z: number; baseY: number } | null;
+  fauna: SurfaceFaunaResult | null;
   spawn: { x: number; y: number; z: number };
   spawnHeading: number;
   profile: SurfaceTraitProfile;
@@ -108,7 +115,7 @@ function buildPoiBeacon(x: number, z: number, baseY: number, color: number): Gro
 function beaconPositionForPoi(poi: SurfacePoiDefinition, baseY: number): Vector3 {
   switch (poi.kind) {
     case 'market':
-      return new Vector3(poi.position.x + 5, baseY + 7, poi.position.z + 5);
+      return new Vector3(poi.position.x + 6, baseY + 5, poi.position.z + 11);
     case 'mine':
       return new Vector3(poi.position.x, baseY + 6, poi.position.z);
     case 'shipyard':
@@ -160,9 +167,25 @@ export function buildSurfaceWorld(
     poiConfig.seed,
     scanDepositSymbols,
   );
+  const cavePoi = poiConfig.pois.find((p) => p.kind === 'cave') ?? null;
+  let caveTunnels: CaveTunnelManager | null = null;
+  let caveConfig: CaveConfig | null = null;
+  if (cavePoi) {
+    const caveBaseY = heightField.getHeight(cavePoi.position.x, cavePoi.position.z);
+    caveTunnels = createCaveTunnelManager(
+      cavePoi.position.x,
+      cavePoi.position.z,
+      caveBaseY,
+      poiConfig.seed,
+    );
+    if (caveTunnels) {
+      caveConfig = caveTunnels.config;
+    }
+  }
   const cart = createMineCart(tunnels);
   const colliders = createSurfaceColliderRegistry();
-  const collision = createSurfaceCollision(heightField, tunnels, colliders);
+  const collision = createSurfaceCollision(heightField, tunnels, colliders, caveTunnels);
+  const caveCollision = caveTunnels ? createCaveInteriorCollision(caveTunnels) : null;
   const spawn = heightField.getSpawn();
   const zones = buildSurfaceZones(poiConfig.pois);
   applyTerrainProfile(terrainManager.material, poiConfig.profile);
@@ -172,9 +195,10 @@ export function buildSurfaceWorld(
   root.add(terrainManager.root);
 
   const poiAnchors: SurfacePoiAnchor[] = [];
-  let marketStalls: MarketStallAnchor[] = [];
+  let marketClerk: MarketClerkAnchor | null = null;
   let marketOrigin: { x: number; z: number; baseY: number } | null = null;
   let shipyardOrigin: { x: number; z: number; baseY: number } | null = null;
+  let caveMouth: { x: number; z: number; baseY: number } | null = null;
 
   if (poiConfig.hasMine && heightField.getPitConfig() && !poiConfig.isGas) {
     const pitMeshes = buildMinePitMeshes(heightField.getPitConfig()!, heightField.getPitFloorY());
@@ -193,16 +217,16 @@ export function buildSurfaceWorld(
       case 'market': {
         const built = buildMarketStructuresAt(x, z, baseY, market);
         root.add(built.group);
-        marketStalls = built.stalls;
+        marketClerk = built.clerk;
         built.colliders.forEach((c) => colliders.add(c, 'market'));
         marketOrigin = { x, z, baseY };
-        const bx = x + 5;
-        const bz = z + 5;
-        root.add(buildPoiBeacon(bx, bz, baseY, beaconColor));
+        const doorX = x + 6;
+        const doorZ = z + 11;
+        root.add(buildPoiBeacon(doorX, doorZ, baseY, beaconColor));
         poiAnchors.push({
           kind: poi.kind,
           label: poi.label,
-          position: beaconPositionForPoi(poi, baseY),
+          position: new Vector3(doorX, baseY + 5, doorZ),
           priority: poi.priority,
         });
         break;
@@ -274,6 +298,11 @@ export function buildSurfaceWorld(
         root.add(built.group);
         built.colliders.forEach((c) => colliders.add(c, 'cave'));
         root.add(buildPoiBeacon(x, z, baseY, beaconColor));
+        caveMouth = { x, z, baseY };
+        if (caveTunnels) {
+          caveTunnels.ensureBuilt();
+          root.add(caveTunnels.root);
+        }
         poiAnchors.push({
           kind: poi.kind,
           label: poi.label,
@@ -296,6 +325,18 @@ export function buildSurfaceWorld(
   root.add(props.group);
   props.colliders.forEach((c) => colliders.add(c, 'static'));
 
+  let fauna: SurfaceFaunaResult | null = null;
+  if (!poiConfig.isGas) {
+    fauna = buildSurfaceFauna(
+      poiConfig.seed,
+      poiConfig.profile,
+      spawn,
+      poiAnchors,
+      (x, z) => heightField.getHeight(x, z),
+    );
+    root.add(fauna.group);
+  }
+
   terrainManager.update(spawn.x, spawn.z);
 
   const spawnHeading = computeSpawnHeading(spawn, poiAnchors);
@@ -305,15 +346,20 @@ export function buildSurfaceWorld(
     heightField,
     terrainManager,
     tunnels,
+    caveTunnels,
+    caveConfig,
+    caveCollision,
     cart,
     collision,
     colliders,
     zones,
     poiAnchors,
     pois: poiConfig.pois,
-    marketStalls,
+    marketClerk,
     marketOrigin,
     shipyardOrigin,
+    caveMouth,
+    fauna,
     spawn,
     spawnHeading,
     profile: poiConfig.profile,
@@ -323,4 +369,6 @@ export function buildSurfaceWorld(
 export function disposeSurfaceWorldResult(world: SurfaceWorldResult): void {
   world.terrainManager.dispose();
   world.tunnels?.dispose();
+  world.caveTunnels?.dispose();
+  world.fauna?.dispose();
 }

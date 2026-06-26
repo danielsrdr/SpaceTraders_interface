@@ -22,6 +22,9 @@ interface TransitPath {
   cumulative: number[];
   totalLength: number;
   flightMode: string;
+  /** Cached endpoint snapshots — invalidated when orbital positions drift. */
+  origin: Vector3;
+  dest: Vector3;
 }
 
 interface OrbitSlot {
@@ -32,6 +35,8 @@ interface OrbitSlot {
 }
 
 const SEGMENTS = 48;
+/** Rebuild transit geometry when an endpoint moves more than this (world units). */
+const TRANSIT_ENDPOINT_EPS = 0.1;
 const scratchA = new Vector3();
 const scratchB = new Vector3();
 const scratchC = new Vector3();
@@ -61,26 +66,76 @@ function ballisticMidpoint(
   return target.set((v0.x + v2.x) * 0.5, (v0.y + v2.y) * 0.5 + lift, (v0.z + v2.z) * 0.5);
 }
 
-function buildArcPoints(v0: Vector3, v2: Vector3, flightMode: string): Vector3[] {
+function endpointsMatch(a: Vector3, b: Vector3, eps: number): boolean {
+  return a.distanceToSquared(b) <= eps * eps;
+}
+
+function transitPathStillValid(
+  path: TransitPath,
+  flightMode: string,
+  originPos: Vector3,
+  destPos: Vector3,
+): boolean {
+  return (
+    path.flightMode === flightMode &&
+    endpointsMatch(path.origin, originPos, TRANSIT_ENDPOINT_EPS) &&
+    endpointsMatch(path.dest, destPos, TRANSIT_ENDPOINT_EPS)
+  );
+}
+
+function buildArcPoints(
+  v0: Vector3,
+  v2: Vector3,
+  flightMode: string,
+  reuse?: Vector3[],
+): Vector3[] {
   const mid = ballisticMidpoint(v0, v2, flightMode, scratchA);
-  const points: Vector3[] = [];
+  const points = reuse ?? [];
+  const needed = SEGMENTS + 1;
+  while (points.length < needed) {
+    points.push(new Vector3());
+  }
+  if (points.length > needed) {
+    points.length = needed;
+  }
   for (let i = 0; i <= SEGMENTS; i++) {
     const t = i / SEGMENTS;
     const u = 1 - t;
     const x = u * u * v0.x + 2 * u * t * mid.x + t * t * v2.x;
     const y = u * u * v0.y + 2 * u * t * mid.y + t * t * v2.y;
     const z = u * u * v0.z + 2 * u * t * mid.z + t * t * v2.z;
-    points.push(new Vector3(x, y, z));
+    points[i]!.set(x, y, z);
   }
   return points;
 }
 
-function buildArcLengths(points: Vector3[]): { cumulative: number[]; totalLength: number } {
-  const cumulative = [0];
+function buildArcLengths(
+  points: Vector3[],
+  reuse?: number[],
+): { cumulative: number[]; totalLength: number } {
+  const cumulative = reuse ?? [];
+  cumulative.length = points.length;
+  cumulative[0] = 0;
   for (let i = 1; i < points.length; i++) {
-    cumulative.push(cumulative[i - 1]! + points[i]!.distanceTo(points[i - 1]!));
+    cumulative[i] = cumulative[i - 1]! + points[i]!.distanceTo(points[i - 1]!);
   }
   return { cumulative, totalLength: cumulative[cumulative.length - 1] ?? 0 };
+}
+
+function rebuildTransitPath(
+  path: TransitPath,
+  originPos: Vector3,
+  destPos: Vector3,
+  flightMode: string,
+): TransitPath {
+  buildArcPoints(originPos, destPos, flightMode, path.points);
+  const { cumulative, totalLength } = buildArcLengths(path.points, path.cumulative);
+  path.cumulative = cumulative;
+  path.totalLength = totalLength;
+  path.flightMode = flightMode;
+  path.origin.copy(originPos);
+  path.dest.copy(destPos);
+  return path;
 }
 
 function sampleAlongPath(
@@ -145,17 +200,29 @@ export class ShipDynamicsEngine {
     destPos: Vector3,
   ): TransitPath {
     const key = this.transitKey(ship);
+    const flightMode = ship.nav.flightMode ?? 'CRUISE';
     const existing = this.transitPaths.get(key);
-    if (existing) return existing;
+    if (existing && transitPathStillValid(existing, flightMode, originPos, destPos)) {
+      return existing;
+    }
 
-    const points = buildArcPoints(originPos, destPos, ship.nav.flightMode ?? 'CRUISE');
-    const { cumulative, totalLength } = buildArcLengths(points);
-    const path: TransitPath = {
-      points,
-      cumulative,
-      totalLength,
-      flightMode: ship.nav.flightMode ?? 'CRUISE',
-    };
+    if (existing) {
+      return rebuildTransitPath(existing, originPos, destPos, flightMode);
+    }
+
+    const path = rebuildTransitPath(
+      {
+        points: [],
+        cumulative: [],
+        totalLength: 0,
+        flightMode,
+        origin: new Vector3(),
+        dest: new Vector3(),
+      },
+      originPos,
+      destPos,
+      flightMode,
+    );
     this.transitPaths.set(key, path);
     return path;
   }

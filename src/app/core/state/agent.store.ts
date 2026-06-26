@@ -10,6 +10,12 @@ export class AgentStore {
     this.agent.set(agent);
   }
 
+  patchCredits(credits: number): void {
+    const current = this.agent();
+    if (!current) return;
+    this.agent.set({ ...current, credits });
+  }
+
   clear(): void {
     this.agent.set(null);
   }

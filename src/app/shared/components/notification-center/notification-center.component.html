@@ -1,0 +1,56 @@
+@if (agentStore.isAuthenticated()) {
+  <button
+    type="button"
+    class="sk-btn fixed top-5 right-5 z-[9000] flex items-center gap-2 px-3 py-2 text-xs"
+    (click)="toggle()"
+    aria-label="Notifications"
+  >
+    <span aria-hidden="true">🔔</span>
+    <span class="tracking-widest uppercase">Alerts</span>
+    @if (unread() > 0) {
+      <span class="rounded-full bg-amber-500/30 px-1.5 text-[10px] text-amber-100 ring-1 ring-amber-400/50">
+        {{ unread() }}
+      </span>
+    }
+  </button>
+
+  @if (open()) {
+    <div class="fixed inset-0 z-[9001] bg-black/40" (click)="close()"></div>
+
+    <aside
+      class="sk-crt fixed top-0 right-0 z-[9002] flex h-screen w-[min(100vw,380px)] flex-col"
+      role="dialog"
+      aria-label="Notifications"
+    >
+      <div class="sk-crt-titlebar">
+        <span class="sk-crt-led"></span>
+        <h2 class="m-0 flex-1 text-sm tracking-[0.25em] uppercase">Notifications</h2>
+        <button type="button" class="sk-btn px-2 py-1 text-xs" (click)="close()">Close</button>
+      </div>
+
+      <div class="sk-crt-body flex flex-col gap-1.5">
+        @for (entry of entries(); track entry.id) {
+          <button
+            type="button"
+            class="sk-crt-row flex-col items-start gap-0.5 text-left"
+            [class.opacity-60]="entry.read"
+            (click)="openEntry(entry)"
+          >
+            <div class="flex w-full items-center justify-between gap-2">
+              <span class="text-[9px] tracking-[0.2em] uppercase" [class]="categoryClass(entry)">
+                {{ entry.category }}
+              </span>
+              <span class="text-[9px] text-white/40">{{ formatTime(entry.timestamp) }}</span>
+            </div>
+            <p class="m-0 text-xs text-white/90">{{ entry.title }}</p>
+            @if (entry.body) {
+              <p class="m-0 text-[10px] text-white/50">{{ entry.body }}</p>
+            }
+          </button>
+        } @empty {
+          <p class="sk-panel-meta">No notifications yet.</p>
+        }
+      </div>
+    </aside>
+  }
+}

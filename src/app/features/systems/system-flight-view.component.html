@@ -16,6 +16,21 @@
     </div>
   }
 
+  @if (launchFade() > 0) {
+    <div
+      class="sk-atmo-burn pointer-events-none absolute inset-0 z-30"
+      [style.opacity]="launchFade()"
+    >
+      @if (launchFade() > 0.35) {
+        <p
+          class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 font-display text-lg tracking-[0.5em] text-sky-100/90 uppercase"
+        >
+          Orbital insertion
+        </p>
+      }
+    </div>
+  }
+
   <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-between p-4">
     <div class="flex w-full max-w-3xl items-start justify-between gap-3">
       <div>

@@ -51,6 +51,22 @@ describe('ShipDynamicsEngine', () => {
     expect(end.position.distanceTo(dest)).toBeLessThan(1);
   });
 
+  it('rebuilds transit path when orbital endpoints move', () => {
+    const engine = new ShipDynamicsEngine();
+    const ship = makeTransitShip();
+    const origin = new Vector3(0, 0, 0);
+    const destA = new Vector3(100, 0, 0);
+    const destB = new Vector3(0, 0, 100);
+
+    const endAtA = engine.sampleTransit(ship, origin, destA, 1);
+    expect(endAtA.position.distanceTo(destA)).toBeLessThan(1);
+    expect(endAtA.position.distanceTo(destB)).toBeGreaterThan(10);
+
+    const endAtB = engine.sampleTransit(ship, origin, destB, 1);
+    expect(endAtB.position.distanceTo(destB)).toBeLessThan(1);
+    expect(endAtB.position.distanceTo(destA)).toBeGreaterThan(10);
+  });
+
   it('produces circular IN_ORBIT motion over time', () => {
     const engine = new ShipDynamicsEngine();
     const parent = new Vector3(50, 0, 50);

@@ -2,8 +2,11 @@ import { inject, Injectable } from '@angular/core';
 import { AnalyticsStore } from '../../core/state/analytics.store';
 import { DiscoveryStore } from '../../core/state/discovery.store';
 import { SurfaceDiscoveryStore } from '../../core/state/surface-discovery.store';
+import { ContractView } from '../../models/contract.model';
 import { ShipData } from '../../models/ship.model';
 import { PlanetView } from '../../models/system.model';
+import { MissionDirectorService } from '../mission-director/mission-director.service';
+import type { ContractDirectorEvent } from '../mission-director/mission-director.models';
 import type { SurfaceWeatherKind } from '../systems/three/surface-trait-profile';
 
 /**
@@ -18,6 +21,7 @@ export class ProgressionService {
   private readonly analytics = inject(AnalyticsStore);
   private readonly discovery = inject(DiscoveryStore);
   private readonly surfaceDiscovery = inject(SurfaceDiscoveryStore);
+  private readonly missionDirector = inject(MissionDirectorService);
 
   recordTrade(input: {
     mode: 'buy' | 'sell';
@@ -83,7 +87,13 @@ export class ProgressionService {
     if (input.origin && input.origin !== input.destination) this.discovery.incrementRoutesFlown();
   }
 
-  recordContract(input: { payment?: number | null; faction?: string; credits?: number }): void {
+  recordContract(input: {
+    payment?: number | null;
+    faction?: string;
+    credits?: number;
+    contract?: Pick<ContractView, 'id' | 'type' | 'faction'>;
+    event?: ContractDirectorEvent;
+  }): void {
     const payment = input.payment ?? 0;
     this.analytics.record({
       t: Date.now(),
@@ -94,6 +104,9 @@ export class ProgressionService {
     if (payment > 0) this.discovery.addRevenue(payment);
     this.discovery.markFactionMet(input.faction);
     this.discovery.recordCredits(input.credits);
+    if (input.contract && input.event) {
+      this.missionDirector.onContractEvent(input.event, input.contract);
+    }
   }
 
   recordExtraction(input: { ship: string; good: string; units: number }): void {
@@ -157,8 +170,18 @@ export class ProgressionService {
     this.surfaceDiscovery.recordMinePercent(planetName, percent);
   }
 
+  recordSurfaceCavePercent(planetName: string, percent: number): void {
+    this.surfaceDiscovery.recordCavePercent(planetName, percent);
+  }
+
   recordSurfaceOreBroken(): void {
     this.surfaceDiscovery.incrementOresBroken();
+  }
+
+  recordFootprintCell(planetName: string, worldX: number, worldZ: number): void {
+    const cx = Math.floor(worldX / 8);
+    const cz = Math.floor(worldZ / 8);
+    this.surfaceDiscovery.markVisitedCell(planetName, cx, cz);
   }
 
   recordRuinsScanned(planetName: string): void {

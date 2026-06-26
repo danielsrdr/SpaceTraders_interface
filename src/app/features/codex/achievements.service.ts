@@ -2,7 +2,9 @@ import { computed, effect, inject, Injectable, signal, untracked } from '@angula
 import { AgentStore } from '../../core/state/agent.store';
 import { DiscoveryStore } from '../../core/state/discovery.store';
 import { SurfaceDiscoveryStore } from '../../core/state/surface-discovery.store';
+import { MissionDirectorStore } from '../../core/state/mission-director.store';
 import { SnackbarService } from '../../shared/services/snackbar.service';
+import { NotificationBridgeService } from '../../shared/services/notification-bridge.service';
 import {
   ACHIEVEMENT_BY_ID,
   ACHIEVEMENTS,
@@ -29,8 +31,10 @@ export interface RecentAchievement {
 export class AchievementsService {
   private readonly discovery = inject(DiscoveryStore);
   private readonly surfaceDiscovery = inject(SurfaceDiscoveryStore);
+  private readonly missionDirector = inject(MissionDirectorStore);
   private readonly agentStore = inject(AgentStore);
   private readonly snackbar = inject(SnackbarService);
+  private readonly notifications = inject(NotificationBridgeService);
 
   private readonly unlockedAtSig = signal<Record<string, number>>({});
   private currentAgent: string | null = null;
@@ -54,9 +58,12 @@ export class AchievementsService {
       biomesSeen: this.surfaceDiscovery.biomesSeen().size,
       stormsWitnessed: storms,
       minesCompleted: this.surfaceDiscovery.minesCompleted(),
+      cavesCompleted: this.surfaceDiscovery.cavesCompleted(),
+      planetsSurfaceMapped: this.surfaceDiscovery.countPlanetsAboveExploreThreshold(50),
       weatherCatalogued: this.surfaceDiscovery.weatherSeen().size,
       ruinsScanned: this.surfaceDiscovery.ruinsScanned().size,
       surfaceSupplyActions: this.surfaceDiscovery.surfaceSupplyActions(),
+      contractsFulfilled: this.missionDirector.totalFulfilled(),
     };
   });
 
@@ -117,6 +124,7 @@ export class AchievementsService {
       const achievement = ACHIEVEMENT_BY_ID.get(id);
       if (achievement) {
         this.snackbar.show(`Achievement unlocked — ${achievement.title}`, 'success', 4000);
+        this.notifications.notifyAchievement(achievement.title);
       }
     }
   }

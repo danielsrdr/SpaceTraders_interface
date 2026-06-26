@@ -1,15 +1,18 @@
 <div class="relative h-full w-full">
   <div #host class="block h-full w-full cursor-crosshair"></div>
 
-  @if (!entryRunning()) {
+  @if (!entryRunning() && !caveTransitionRunning()) {
     <app-exo-suit-hud
       [hazardLevel]="hazardLevel()"
       [sensorQuality]="sensorQuality()"
       [weatherEvent]="weatherEvent()"
       [weatherIntensity]="weatherIntensity()"
       [jetpackFuel]="jetpackFuel()"
-      [poiCompass]="poiCompass()"
-      [mineProgressPct]="mineProgressPct()"
+      [poiCompass]="caveInteriorActive() ? null : poiCompass()"
+      [mineProgressPct]="caveInteriorActive() ? null : mineProgressPct()"
+      [caveProgressPct]="caveInteriorActive() ? caveProgressPct() : null"
+      [footprintCells]="footprintCells()"
+      [playerFootprintCell]="playerFootprintCell()"
     />
   }
 
@@ -24,7 +27,7 @@
     @if (!entryRunning() && !launchActive()) {
       @if (marketPending()) {
         <p class="rounded bg-emerald-950/80 px-4 py-3 text-sm text-emerald-200 ring-1 ring-emerald-500/40">
-          Market opening…
+          Clerk is checking the ledger…
         </p>
       } @else if (isGasGiant()) {
         <p class="rounded bg-violet-950/80 px-4 py-3 text-sm text-violet-200 ring-1 ring-violet-500/40">
@@ -43,11 +46,29 @@
 
     @if (launchActive()) {
       <p class="rounded bg-sky-950/80 px-4 py-3 font-display text-sm tracking-[0.35em] text-sky-200 ring-1 ring-sky-500/40 uppercase">
-        @if (launchPhaseLabel() === 'levitate') {
-          Repulsors — levitating
-        } @else {
-          Main thrusters — climbing
+        @switch (launchPhaseLabel()) {
+          @case ('preflight') {
+            Preflight — systems check
+          }
+          @case ('levitate') {
+            Repulsors — levitating
+          }
+          @case ('pitch') {
+            Main engines — ignition
+          }
+          @case ('climb') {
+            Main thrusters — climbing
+          }
+          @default {
+            Launch sequence
+          }
         }
+      </p>
+    }
+
+    @if (boardingActive()) {
+      <p class="rounded bg-emerald-950/80 px-4 py-3 font-display text-sm tracking-[0.35em] text-emerald-200 ring-1 ring-emerald-500/40 uppercase">
+        Boarding — approach ramp
       </p>
     }
 
@@ -68,7 +89,7 @@
     </div>
   </div>
 
-  @if (!entryRunning() && !launchActive()) {
+  @if (!entryRunning() && !launchActive() && !boardingActive()) {
     @for (poi of poiLabels(); track poi.kind) {
       <div
         class="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full"
@@ -89,9 +110,29 @@
         </div>
       </div>
     }
+    @if (shipScreenLabel(); as shipLabel) {
+      <div
+        class="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full"
+        [style.left.px]="shipLabel.x"
+        [style.top.px]="shipLabel.y"
+        [style.opacity]="shipLabel.opacity"
+      >
+        <div
+          class="sk-holo-panel"
+          [class.sk-holo-panel--active]="shipLabel.inRange"
+          data-kind="shipyard"
+        >
+          <span class="sk-holo-node"></span>
+          <span>{{ shipLabel.label }}</span>
+          @if (shipLabel.inRange) {
+            <span class="sk-holo-key">[E] Board</span>
+          }
+        </div>
+      </div>
+    }
   }
 
-  @if (!entryRunning() && !launchActive() && nearLandedShip() && landedShipLabel(); as ship) {
+  @if (!entryRunning() && !launchActive() && !boardingActive() && nearLandedShip() && landedShipLabel(); as ship) {
     <div class="pointer-events-none absolute bottom-24 left-1/2 z-20 -translate-x-1/2">
       <div class="sk-holo-panel sk-holo-panel--active" data-kind="shipyard">
         <span class="sk-holo-node"></span>
@@ -101,17 +142,24 @@
     </div>
   }
 
-  @if (!entryRunning() && focusedStall(); as stall) {
+  @if (!entryRunning() && nearClerk() && !marketDialogOpen()) {
     <div class="pointer-events-none absolute bottom-24 left-1/2 z-20 -translate-x-1/2">
       <div class="sk-holo-panel sk-holo-panel--active" data-kind="market">
         <span class="sk-holo-node"></span>
-        <span>{{ goodLabel(stall.symbol) }}</span>
-        <span class="sk-holo-key">{{ stall.type }}</span>
-        <span class="sk-holo-key">&times; {{ tradeUnits() }}</span>
-        <span class="sk-holo-key">[E] Buy &middot; [Q] Sell &middot; wheel: units</span>
+        <span>Trading clerk</span>
+        <span class="sk-holo-key">[E] Talk &amp; trade</span>
       </div>
     </div>
   }
+
+  <app-surface-market-dialog
+    [open]="marketDialogOpen()"
+    [planet]="planet()"
+    [market]="market()"
+    [marketPending]="marketPending()"
+    (trade)="onMarketTrade($event)"
+    (close)="closeMarketDialog()"
+  />
 
   @if (!entryRunning() && !launchActive()) {
     <div
@@ -121,6 +169,20 @@
 
   @if (entryVeil() > 0) {
     <div class="sk-atmo-veil pointer-events-none absolute inset-0 z-30" [style.opacity]="entryVeil()"></div>
+    @if (launchActive() && entryVeil() > 0.35) {
+      <div class="pointer-events-none absolute inset-0 z-40 flex flex-col items-center justify-center text-center">
+        <p class="font-display text-2xl tracking-[0.5em] text-sky-100/90 uppercase">Atmospheric exit</p>
+        <p class="mt-3 text-xs tracking-[0.3em] text-sky-200/70 uppercase">Climbing from {{ planet().name }}</p>
+      </div>
+    }
+  }
+
+  @if (caveInteriorActive() && !caveTransitionRunning()) {
+    <div class="pointer-events-none absolute top-20 left-4 z-20">
+      <p class="rounded bg-indigo-950/80 px-3 py-1.5 text-[11px] text-indigo-200 ring-1 ring-indigo-400/40">
+        Cave interior — [E] at entrance to exit · break crystals to map
+      </p>
+    </div>
   }
 
   @if (entryRunning()) {

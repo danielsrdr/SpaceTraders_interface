@@ -10,8 +10,17 @@
     <div
       class="fixed top-0 right-0 left-0 z-[9997] bg-amber-600/90 py-1 text-center text-xs font-medium text-black"
     >
-      Offline — showing cached data. Actions are disabled until you reconnect.
+      Offline — cached codex, dashboard and spectate remain available where cached.
     </div>
+  }
+  @if (pwaInstall.canInstall() && !pwaInstall.installed()) {
+    <button
+      type="button"
+      class="fixed bottom-4 right-4 z-[9996] rounded-full border border-cyan-400/40 bg-black/80 px-4 py-2 text-xs tracking-[0.12em] text-cyan-200 uppercase shadow-lg backdrop-blur"
+      (click)="installApp()"
+    >
+      Install app
+    </button>
   }
   <main class="m-0 h-screen w-full p-0">
     <router-outlet />
@@ -19,4 +28,8 @@
   <app-snackbar />
   <app-confirm-dialog />
   <app-logbook-drawer />
+  <app-command-palette />
+  <app-keyboard-help-overlay />
+  <app-notification-center />
+  <app-onboarding-tour />
 </div>

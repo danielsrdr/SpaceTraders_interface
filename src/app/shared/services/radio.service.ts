@@ -70,6 +70,11 @@ export class RadioService {
     this.announce(`Contract update. ${message}.`);
   }
 
+  announceDirector(line: string, faction?: string | null): void {
+    const prefix = faction ? `${this.speakable(faction)} director.` : 'Mission director.';
+    this.announce(`${prefix} ${line}`);
+  }
+
   announcePirate(count: number, waypoint?: string | null): void {
     const vessels = count === 1 ? 'an unidentified vessel' : `${count} unidentified vessels`;
     const where = waypoint ? ` near ${this.speakable(waypoint)}` : '';
@@ -102,6 +107,23 @@ export class RadioService {
         // Some browsers throw if speech is invoked outside a gesture; ignore.
       }
     }, 170);
+  }
+
+  /** One-shot proximity call when entering ruins or cave zones on foot. */
+  announceZoneProximity(kind: 'ruins' | 'cave', planet?: string): void {
+    const where = planet ? ` at ${this.speakable(planet)}` : '';
+    switch (kind) {
+      case 'ruins':
+        this.announce(`Anomaly field detected${where} — artifact resonance elevated.`);
+        break;
+      case 'cave':
+        this.announce(`Subsurface cavity${where} — recommend structural scan before ingress.`);
+        break;
+      default: {
+        const _exhaustive: never = kind;
+        void _exhaustive;
+      }
+    }
   }
 
   private onLogEntry(entry: LogEntry): void {

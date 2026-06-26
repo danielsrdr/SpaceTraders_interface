@@ -89,6 +89,19 @@ export class SurfaceAudioService {
     }
   }
 
+  /** Crossfade all active loops out before launch SFX take over. */
+  fadeOut(durationMs = 800): void {
+    if (!this.running) return;
+    const fadeMs = Math.max(0, durationMs);
+    for (const key of [...this.active.keys()]) {
+      this.fadeLoop(key, 0, fadeMs);
+    }
+    setTimeout(() => {
+      if (!this.running) return;
+      this.stop();
+    }, fadeMs + 60);
+  }
+
   private async applyAmbience(
     profile: SurfaceAmbienceProfile,
     weather: SurfaceWeatherKind | null,

@@ -6,7 +6,7 @@
       "name": "app",
       "installMode": "prefetch",
       "resources": {
-        "files": ["/favicon.ico", "/index.html", "/*.css", "/*.js"]
+        "files": ["/favicon.ico", "/index.html", "/manifest.webmanifest", "/*.css", "/*.js"]
       }
     },
     {
@@ -14,7 +14,15 @@
       "installMode": "lazy",
       "updateMode": "prefetch",
       "resources": {
-        "files": ["/assets/**", "/*.(svg|png|jpg|jpeg|webp|gif|mp3|woff|woff2)"]
+        "files": ["/assets/**", "/*.(svg|png|jpg|jpeg|webp|gif|mp3|wav|woff|woff2)"]
+      }
+    },
+    {
+      "name": "offline-views",
+      "installMode": "lazy",
+      "updateMode": "prefetch",
+      "resources": {
+        "files": ["/assets/**", "/*.(svg|png|jpg|jpeg|webp|gif|mp3|wav|woff|woff2)"]
       }
     }
   ],
@@ -27,6 +35,15 @@
         "maxSize": 200,
         "maxAge": "1d",
         "timeout": "5s"
+      }
+    },
+    {
+      "name": "factions-catalog",
+      "urls": ["https://api.spacetraders.io/v2/factions**"],
+      "cacheConfig": {
+        "strategy": "performance",
+        "maxSize": 20,
+        "maxAge": "7d"
       }
     }
   ]

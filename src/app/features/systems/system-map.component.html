@@ -15,9 +15,11 @@
       [selectedCargo]="shipCargo()"
       [landingPlanet]="landingPlanet()"
       [landingActive]="viewMode() === 'landing'"
+      [launchHandoff]="launchHandoffActive()"
       [actionPulse]="actionPulse()"
       [contractWaypoints]="contractWaypoints()"
       [replayVoyage]="replayVoyage()"
+      [ghostShips]="ghostShipsOnMap()"
       (planetClick)="onPlanetClick($event)"
       (shipClick)="selectShip($event)"
       (landingComplete)="onLandingComplete()"
@@ -42,6 +44,7 @@
       (oreBroken)="onSurfaceOreBroken($event)"
       (cartDelivered)="onSurfaceCartDelivered()"
       (ruinsScanned)="onSurfaceRuinsScanned()"
+      (caveMapped)="onSurfaceCaveMapped($event)"
       (marketTrade)="onSurfaceMarketTrade($event)"
       (exitSurface)="onExitSurface()"
       (launchComplete)="onLaunchComplete()"
@@ -1066,14 +1069,27 @@
       <p class="sk-panel-meta mt-2 mb-0 text-[11px] text-cyan-300/90">
         Click a planet to travel · G on map for global god view
       </p>
-      <div class="mt-2 flex gap-1">
+      <div class="mt-2 flex flex-wrap gap-1">
         <button type="button" class="sk-btn flex-1 px-2 py-1 text-xs" (click)="shareSpectatorLink()">
           Share
         </button>
         <button type="button" class="sk-btn flex-1 px-2 py-1 text-xs" (click)="openPostcard()">
           Postcard
         </button>
+        <button
+          type="button"
+          class="sk-btn flex-1 px-2 py-1 text-xs"
+          [class.bg-cyan-400/20]="ghostFleet.enabled()"
+          (click)="ghostFleet.toggle()"
+        >
+          {{ ghostFleet.enabled() ? 'Agents on' : 'Agents off' }}
+        </button>
       </div>
+      @if (ghostFleet.enabled() && ghostShipsOnMap().length) {
+        <p class="sk-panel-meta mt-2 mb-0 text-[10px] text-white/45">
+          {{ ghostShipsOnMap().length }} ghost contact(s) · HQ pins + sensor scan
+        </p>
+      }
     </div>
   }
 

@@ -918,6 +918,25 @@
     animation: sk-nav-pulse 1.8s ease-in-out infinite;
   }
 
+  .sk-mini-ship-docked {
+    fill: #38bdf8;
+    cursor: pointer;
+  }
+
+  .sk-mini-ship-orbit {
+    fill: #7dd3fc;
+    cursor: pointer;
+  }
+
+  .sk-mini-ship-transit {
+    fill: #5eead4;
+    cursor: pointer;
+  }
+
+  .sk-fleet-mini-map .sk-mini-map-svg {
+    aspect-ratio: 320 / 200;
+  }
+
   /* Contract complete celebration */
   .sk-contract-stamp {
     @apply pointer-events-none fixed inset-0 z-[10001] flex items-center justify-center;

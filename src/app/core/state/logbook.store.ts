@@ -5,6 +5,9 @@ export type LogCategory = 'extract' | 'siphon' | 'trade' | 'refuel' | 'contract'
 
 export interface LogEntryMeta {
   thumbnail?: string;
+  contractId?: string;
+  arcId?: string;
+  directorLine?: string;
 }
 
 export interface LogEntry {
@@ -155,8 +158,8 @@ export class LogbookStore {
     this.append({ category: 'refuel', ship, waypoint, message: `Refueled${amount} fuel${where}${price}` });
   }
 
-  recordContract(message: string, waypoint?: string): void {
-    this.append({ category: 'contract', message, waypoint });
+  recordContract(message: string, waypoint?: string, meta?: LogEntryMeta): void {
+    this.append({ category: 'contract', message, waypoint, meta });
   }
 
   recordSurfaceLand(planet: string, biomes: string[]): void {
@@ -173,6 +176,14 @@ export class LogbookStore {
       category: 'surface',
       waypoint: planet,
       message: `Artifact survey complete — ${planet}`,
+    });
+  }
+
+  recordCaveMapped(planet: string, percent: number): void {
+    this.append({
+      category: 'surface',
+      waypoint: planet,
+      message: `Cave mapped — ${planet} (${percent}% structural scan)`,
     });
   }
 

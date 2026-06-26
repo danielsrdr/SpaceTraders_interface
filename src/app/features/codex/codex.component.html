@@ -65,6 +65,22 @@
         </div>
       }
     </div>
+  } @else if (tab() === 'operations') {
+    <div class="flex flex-col gap-3">
+      @if (missionDirector.recentOperations().length === 0) {
+        <div class="sk-panel">
+          <p class="sk-panel-meta">{{ unlockHint() }}</p>
+        </div>
+      } @else {
+        @for (op of missionDirector.recentOperations(); track op.contractId + op.fulfilledAt) {
+          <article class="sk-panel">
+            <p class="m-0 text-sm text-white">{{ op.briefingTitle }}</p>
+            <p class="sk-panel-meta">{{ op.factionSymbol }} · {{ op.contractType }} · {{ op.fulfilledAt | date: 'medium' }}</p>
+            <p class="m-0 mt-2 text-xs text-white/70">{{ op.debrief }}</p>
+          </article>
+        }
+      }
+    </div>
   } @else if (tab() === 'surface') {
     <div class="flex flex-col gap-4">
       <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
@@ -90,9 +106,63 @@
           </ul>
         </div>
       }
+      @if (surfaceCaveEntries().length) {
+        <div class="sk-panel">
+          <h2 class="m-0 font-display text-sm tracking-widest text-indigo-200 uppercase">Cave maps</h2>
+          <ul class="m-0 mt-2 list-none space-y-1 p-0 text-xs text-white/70">
+            @for (row of surfaceCaveEntries(); track row.planet) {
+              <li class="flex justify-between gap-2">
+                <span>{{ row.planet }}</span>
+                <span class="font-mono text-indigo-300">{{ row.pct }}%</span>
+              </li>
+            }
+          </ul>
+        </div>
+      }
+      @if (footprintPlanets().length) {
+        <div class="sk-panel">
+          <h2 class="m-0 font-display text-sm tracking-widest text-teal-200 uppercase">Footprints</h2>
+          <div class="mt-2 flex flex-wrap gap-1">
+            @for (p of footprintPlanets(); track p) {
+              <button
+                type="button"
+                class="rounded px-2 py-0.5 text-[10px] uppercase tracking-wide transition"
+                [class]="footprintPlanet() === p ? 'bg-teal-400/90 text-black' : 'bg-black/40 text-white/60 hover:text-white'"
+                (click)="setFootprintPlanet(p)"
+              >
+                {{ p }}
+              </button>
+            }
+          </div>
+          @if (footprintPlanet(); as fp) {
+            <canvas
+              #footprintCanvas
+              class="mt-3 rounded border border-teal-500/30 bg-slate-950"
+              width="128"
+              height="128"
+            ></canvas>
+            <p class="m-0 mt-2 text-[11px] text-white/55">
+              {{ fp }} — {{ surfaceDiscovery.getExplorePercent(fp) }}% of walkable surface charted
+            </p>
+          }
+        </div>
+      }
+      @if (surfaceExploreEntries().length) {
+        <div class="sk-panel">
+          <h2 class="m-0 font-display text-sm tracking-widest text-teal-200 uppercase">Surface coverage</h2>
+          <ul class="m-0 mt-2 list-none space-y-1 p-0 text-xs text-white/70">
+            @for (row of surfaceExploreEntries(); track row.planet) {
+              <li class="flex justify-between gap-2">
+                <span>{{ row.planet }}</span>
+                <span class="font-mono text-teal-300">{{ row.pct }}%</span>
+              </li>
+            }
+          </ul>
+        </div>
+      }
       <p class="m-0 text-[11px] text-white/45">
         Planets landed: {{ surfaceDiscovery.planetsLanded().size }} · Ruins scanned:
-        {{ surfaceDiscovery.ruinsScanned().size }}
+        {{ surfaceDiscovery.ruinsScanned().size }} · Caves mapped: {{ surfaceDiscovery.cavesMapped().size }}
       </p>
     </div>
   } @else {

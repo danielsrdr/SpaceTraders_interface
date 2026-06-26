@@ -12,9 +12,12 @@ export interface ProgressSnapshot {
   biomesSeen: number;
   stormsWitnessed: number;
   minesCompleted: number;
+  cavesCompleted: number;
+  planetsSurfaceMapped: number;
   weatherCatalogued: number;
   ruinsScanned: number;
   surfaceSupplyActions: number;
+  contractsFulfilled: number;
 }
 
 export interface Achievement {
@@ -151,6 +154,26 @@ const FAMILIES: FamilyDef[] = [
     ],
   },
   {
+    family: 'spelunker',
+    color: '#6366f1',
+    metric: (s) => s.cavesCompleted,
+    tiers: [
+      { threshold: 1, title: 'Spelunker', description: 'Map a cave network to 80% on one planet.' },
+      { threshold: 3, title: 'Deep Mapper', description: 'Map cave networks on 3 planets.' },
+      { threshold: 8, title: 'Master Spelunker', description: 'Map cave networks on 8 planets.' },
+    ],
+  },
+  {
+    family: 'cartographer-surface',
+    color: '#2dd4bf',
+    metric: (s) => s.planetsSurfaceMapped,
+    tiers: [
+      { threshold: 1, title: 'Trailblazer', description: 'Explore 50% of one planetary surface.' },
+      { threshold: 3, title: 'Surface Cartographer', description: 'Explore 50% of surfaces on 3 planets.' },
+      { threshold: 8, title: 'Master Surface Cartographer', description: 'Explore 70% of surfaces on 8 planets.' },
+    ],
+  },
+  {
     family: 'storm-chaser',
     color: '#a855f7',
     metric: (s) => s.weatherCatalogued,
@@ -176,6 +199,16 @@ const FAMILIES: FamilyDef[] = [
     tiers: [
       { threshold: 5, title: 'Field Refueler', description: 'Complete 5 surface depot supply actions.' },
       { threshold: 25, title: 'Field Quartermaster', description: 'Complete 25 surface depot supply actions.' },
+    ],
+  },
+  {
+    family: 'contractor',
+    color: '#14b8a6',
+    metric: (s) => s.contractsFulfilled,
+    tiers: [
+      { threshold: 1, title: 'Contractor', description: 'Fulfill your first faction contract.' },
+      { threshold: 10, title: 'Fixer', description: 'Fulfill 10 faction contracts.' },
+      { threshold: 50, title: 'Mission Specialist', description: 'Fulfill 50 faction contracts.' },
     ],
   },
 ];

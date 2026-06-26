@@ -33,7 +33,7 @@ export function getActiveZone(x: number, y: number, z: number, zones: SurfaceZon
 function zoneAabbForKind(kind: SurfaceZoneKind, x: number, z: number): Aabb {
   switch (kind) {
     case 'market':
-      return { minX: x - 6, maxX: x + 18, minY: 0, maxY: 14, minZ: z - 6, maxZ: z + 18 };
+      return { minX: x - 1, maxX: x + 13, minY: 0, maxY: 8, minZ: z - 1, maxZ: z + 13 };
     case 'mine':
       return {
         minX: x - PIT_RADIUS,
@@ -77,7 +77,7 @@ export function buildProceduralSurfaceZones(
 ): SurfaceZone[] {
   const pois: SurfacePoiDefinition[] = [];
   if (hasMarket && poi.market) {
-    pois.push({ kind: 'market', label: 'Market', position: poi.market, priority: 80 });
+    pois.push({ kind: 'market', label: 'Trading Post', position: poi.market, priority: 80 });
   }
   if (hasMine && poi.mine) {
     pois.push({ kind: 'mine', label: 'Mine', position: poi.mine, priority: 70 });

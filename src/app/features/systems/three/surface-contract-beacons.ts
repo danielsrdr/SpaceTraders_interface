@@ -6,7 +6,7 @@ import type { SurfacePoiDefinition } from './surface-poi-registry';
 
 export interface SurfaceContractBeacon {
   contractId: string;
-  kind: 'deliver-crate' | 'survey-ruins';
+  kind: 'deliver-crate' | 'survey-ruins' | 'survey-cave';
   poiKind: SurfaceZoneKind;
   tradeSymbol?: string;
   unitsRemaining?: number;
@@ -82,6 +82,20 @@ export function resolveSurfaceContractBeacons(
         });
       }
     }
+
+    const hasCave = pois.some((p) => p.kind === 'cave');
+    if (hasCave && surveyMatch) {
+      const key = `survey-cave:${contract.id}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        beacons.push({
+          contractId: contract.id,
+          kind: 'survey-cave',
+          poiKind: 'cave',
+          label: 'Survey cave network',
+        });
+      }
+    }
   }
 
   return beacons;
@@ -99,6 +113,8 @@ export function beaconPositionForPoi(
       return { x: x + 1, y: baseY + 0.5, z: z + 1 };
     case 'ruins':
       return { x, y: baseY + 0.4, z };
+    case 'cave':
+      return { x, y: baseY + 0.5, z };
     default:
       return { x, y: baseY + 0.5, z };
   }

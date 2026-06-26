@@ -31,5 +31,40 @@
         </div>
       }
     </div>
+
+    <div class="sk-panel mx-auto mt-6 w-full max-w-4xl">
+      <p class="sk-panel-heading">Regional price comparator</p>
+      <p class="mb-3 max-w-prose text-left text-xs text-white/75">
+        Find the best buy and sell prices for a good across marketplace waypoints in your current system.
+      </p>
+      <div class="mb-3 flex flex-wrap gap-2">
+        <input
+          class="sk-input min-w-[180px] flex-1 text-sm"
+          type="text"
+          placeholder="Trade symbol e.g. IRON_ORE"
+          [ngModel]="priceSymbol()"
+          (ngModelChange)="priceSymbol.set($event)"
+        />
+        <button type="button" class="sk-btn text-xs" [disabled]="priceLoading()" (click)="comparePrices()">
+          {{ priceLoading() ? 'Comparing…' : 'Compare' }}
+        </button>
+      </div>
+      @for (quote of priceQuotes(); track quote.tradeSymbol) {
+        <article class="border-b border-white/10 py-2 text-left text-xs last:border-b-0">
+          <p class="text-sm text-sky-300">{{ quote.tradeSymbol }}</p>
+          @if (quote.bestSell) {
+            <p class="text-white/80">
+              Best sell: {{ quote.bestSell.waypoint }} — {{ quote.bestSell.price }} cr ({{ quote.bestSell.supply }})
+            </p>
+          }
+          @if (quote.bestBuy) {
+            <p class="text-white/80">Best buy: {{ quote.bestBuy.waypoint }} — {{ quote.bestBuy.price }} cr</p>
+          }
+          @if (quote.spread != null) {
+            <p class="text-white/55">Spread: {{ quote.spread }} cr</p>
+          }
+        </article>
+      }
+    </div>
   </div>
 </div>

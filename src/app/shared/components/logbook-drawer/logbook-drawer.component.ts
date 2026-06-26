@@ -1,6 +1,7 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject } from '@angular/core';
 import { AgentStore } from '../../../core/state/agent.store';
 import { logCategoryClass, LogbookStore, LogCategory, LogEntry } from '../../../core/state/logbook.store';
+import { LogbookDrawerService } from '../../services/logbook-drawer.service';
 
 @Component({
   selector: 'app-logbook-drawer',
@@ -9,16 +10,17 @@ import { logCategoryClass, LogbookStore, LogCategory, LogEntry } from '../../../
 export class LogbookDrawerComponent {
   readonly agentStore = inject(AgentStore);
   readonly logbook = inject(LogbookStore);
+  readonly drawer = inject(LogbookDrawerService);
 
-  readonly open = signal(false);
+  readonly open = this.drawer.open;
   readonly entriesReversed = computed(() => [...this.logbook.entries()].reverse());
 
   toggle(): void {
-    this.open.update((v) => !v);
+    this.drawer.toggle();
   }
 
   close(): void {
-    this.open.set(false);
+    this.drawer.close();
   }
 
   formatDay(entry: LogEntry): string {

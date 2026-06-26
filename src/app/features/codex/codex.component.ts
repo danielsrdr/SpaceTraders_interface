@@ -1,20 +1,26 @@
-import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
+import { Component, computed, effect, ElementRef, inject, OnDestroy, OnInit, signal, viewChild } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { FactionData } from '../../models/faction.model';
 import { SpaceTradersApiService } from '../../services/spacetraders-api.service';
 import { DiscoveryStore } from '../../core/state/discovery.store';
-import { SurfaceDiscoveryStore } from '../../core/state/surface-discovery.store';
+import {
+  FOOTPRINT_CELL_SIZE,
+  SurfaceDiscoveryStore,
+} from '../../core/state/surface-discovery.store';
 import { PageBackgroundService } from '../../shared/services/page-background.service';
 import { factionColor } from '../../shared/faction-colors';
 import { resolveWaypointType } from '../systems/planet-helpers';
 import { goodCategory, goodLabel } from '../systems/trade-good-visuals';
+import { WORLD_RADIUS } from '../systems/three/terrain/terrain-height';
 import { CodexThumbnailService } from './codex-thumbnail.service';
 import { CodexWaypointViewerComponent } from './codex-waypoint-viewer.component';
 import { CodexArtViewerComponent } from './codex-art-viewer.component';
 import { GOODS_CODEX, SURFACE_BIOME_CODEX, WAYPOINT_CODEX } from './codex-catalog';
 import { AchievementProgress } from './achievements';
 import { AchievementsService } from './achievements.service';
+import { MissionDirectorService } from '../mission-director/mission-director.service';
 
-export type CodexTab = 'waypoints' | 'factions' | 'goods' | 'surface' | 'achievements';
+export type CodexTab = 'waypoints' | 'factions' | 'goods' | 'surface' | 'achievements' | 'operations';
 
 export interface CodexCard {
   id: string;
@@ -41,12 +47,13 @@ const GOOD_CATEGORY_BLURB: Record<string, string> = {
 @Component({
   selector: 'app-codex',
   templateUrl: './codex.component.html',
-  imports: [CodexWaypointViewerComponent, CodexArtViewerComponent],
+  imports: [CodexWaypointViewerComponent, CodexArtViewerComponent, DatePipe],
 })
 export class CodexComponent implements OnInit, OnDestroy {
   readonly discovery = inject(DiscoveryStore);
   readonly surfaceDiscovery = inject(SurfaceDiscoveryStore);
   readonly achievements = inject(AchievementsService);
+  readonly missionDirector = inject(MissionDirectorService);
   private readonly api = inject(SpaceTradersApiService);
   private readonly thumbnails = inject(CodexThumbnailService);
   private readonly background = inject(PageBackgroundService);
@@ -63,6 +70,7 @@ export class CodexComponent implements OnInit, OnDestroy {
     { id: 'goods', label: 'Goods' },
     { id: 'surface', label: 'Surface' },
     { id: 'achievements', label: 'Achievements' },
+    { id: 'operations', label: 'Operations' },
   ];
 
   private readonly unlockedWaypointTypes = computed(
@@ -122,6 +130,28 @@ export class CodexComponent implements OnInit, OnDestroy {
       .map(([planet, pct]) => ({ planet, pct }));
   });
 
+  readonly surfaceCaveEntries = computed(() => {
+    const map = this.surfaceDiscovery.maxCavePercent();
+    return Object.entries(map)
+      .filter(([, pct]) => pct > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([planet, pct]) => ({ planet, pct }));
+  });
+
+  readonly surfaceExploreEntries = computed(() => {
+    const map = this.surfaceDiscovery.maxExplorePercent();
+    return Object.entries(map)
+      .filter(([, pct]) => pct > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([planet, pct]) => ({ planet, pct }));
+  });
+
+  readonly footprintPlanets = computed(() => [...this.surfaceDiscovery.planetsLanded()].sort());
+
+  readonly footprintPlanet = signal<string | null>(null);
+
+  private readonly footprintCanvas = viewChild<ElementRef<HTMLCanvasElement>>('footprintCanvas');
+
   readonly activeCards = computed<CodexCard[]>(() => {
     const tab = this.tab();
     switch (tab) {
@@ -135,6 +165,8 @@ export class CodexComponent implements OnInit, OnDestroy {
         return this.surfaceBiomeCards();
       case 'achievements':
         return [];
+      case 'operations':
+        return [];
       default: {
         const _exhaustive: never = tab;
         void _exhaustive;
@@ -143,16 +175,36 @@ export class CodexComponent implements OnInit, OnDestroy {
     }
   });
 
-  readonly headerUnlocked = computed(() =>
-    this.tab() === 'achievements' ? this.achievements.unlockedCount() : this.activeCards().filter((c) => c.unlocked).length,
-  );
-  readonly headerTotal = computed(() =>
-    this.tab() === 'achievements' ? this.achievements.total : this.activeCards().length,
-  );
+  readonly headerUnlocked = computed(() => {
+    if (this.tab() === 'achievements') return this.achievements.unlockedCount();
+    if (this.tab() === 'operations') return this.missionDirector.recentOperations().length;
+    return this.activeCards().filter((c) => c.unlocked).length;
+  });
+  readonly headerTotal = computed(() => {
+    if (this.tab() === 'achievements') return this.achievements.total;
+    if (this.tab() === 'operations') return Math.max(5, this.missionDirector.recentOperations().length);
+    return this.activeCards().length;
+  });
   readonly progressPct = computed(() => {
     const total = this.headerTotal();
     return total ? Math.round((this.headerUnlocked() / total) * 100) : 0;
   });
+
+  constructor() {
+    effect(() => {
+      const planets = this.footprintPlanets();
+      if (!this.footprintPlanet() && planets.length) {
+        this.footprintPlanet.set(planets[0]!);
+      }
+    });
+    effect(() => {
+      const planet = this.footprintPlanet();
+      const cells = planet ? this.surfaceDiscovery.getVisitedCellsForPlanet(planet) : [];
+      const canvasRef = this.footprintCanvas();
+      if (!canvasRef || !planet) return;
+      this.drawFootprintHeatmap(canvasRef.nativeElement, cells);
+    });
+  }
 
   ngOnInit(): void {
     this.background.setBackground('/assets/img/background.png');
@@ -166,6 +218,39 @@ export class CodexComponent implements OnInit, OnDestroy {
   setTab(tab: CodexTab): void {
     this.tab.set(tab);
     this.selected.set(null);
+  }
+
+  setFootprintPlanet(planet: string): void {
+    this.footprintPlanet.set(planet);
+  }
+
+  private drawFootprintHeatmap(canvas: HTMLCanvasElement, cells: readonly string[]): void {
+    const size = 128;
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.fillStyle = '#0a1024';
+    ctx.fillRect(0, 0, size, size);
+
+    const visited = new Set(cells);
+    const cellsPerRadius = Math.ceil(WORLD_RADIUS / FOOTPRINT_CELL_SIZE);
+    const scale = size / (cellsPerRadius * 2 + 2);
+
+    for (let cx = -cellsPerRadius; cx <= cellsPerRadius; cx++) {
+      for (let cz = -cellsPerRadius; cz <= cellsPerRadius; cz++) {
+        const centerX = (cx + 0.5) * FOOTPRINT_CELL_SIZE;
+        const centerZ = (cz + 0.5) * FOOTPRINT_CELL_SIZE;
+        if (Math.hypot(centerX, centerZ) > WORLD_RADIUS) continue;
+        const px = (cx + cellsPerRadius + 0.5) * scale;
+        const pz = (cz + cellsPerRadius + 0.5) * scale;
+        ctx.fillStyle = visited.has(`${cx},${cz}`)
+          ? 'rgba(45, 212, 191, 0.75)'
+          : 'rgba(30, 41, 59, 0.6)';
+        ctx.fillRect(px - scale * 0.45, pz - scale * 0.45, scale * 0.9, scale * 0.9);
+      }
+    }
   }
 
   openDetail(card: CodexCard): void {
@@ -190,6 +275,8 @@ export class CodexComponent implements OnInit, OnDestroy {
         return '';
       case 'achievements':
         return '';
+      case 'operations':
+        return '';
       default: {
         const _exhaustive: never = tab;
         void _exhaustive;
@@ -211,6 +298,8 @@ export class CodexComponent implements OnInit, OnDestroy {
         return 'Walk this biome on a planetary surface to log it.';
       case 'achievements':
         return '';
+      case 'operations':
+        return 'Complete faction contracts to archive operations here.';
       default: {
         const _exhaustive: never = tab;
         void _exhaustive;

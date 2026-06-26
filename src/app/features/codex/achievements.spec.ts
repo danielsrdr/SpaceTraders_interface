@@ -18,9 +18,12 @@ const EMPTY: ProgressSnapshot = {
   biomesSeen: 0,
   stormsWitnessed: 0,
   minesCompleted: 0,
+  cavesCompleted: 0,
+  planetsSurfaceMapped: 0,
   weatherCatalogued: 0,
   ruinsScanned: 0,
   surfaceSupplyActions: 0,
+  contractsFulfilled: 0,
 };
 
 describe('ACHIEVEMENTS catalog', () => {

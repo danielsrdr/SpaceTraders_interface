@@ -1,40 +1,139 @@
-<p class="sk-title">HOME</p>
-<div class="sk-home">
-  <h1>WELCOME TO</h1>
-  <img src="/assets/logo/spacetradertitle.png" alt="SpaceTraders" class="w-[60%]" />
-  <p>Skamkraft is based on the SpaceTraders API</p>
+<div class="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-3 p-6 pt-24">
+  <header class="flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <p class="m-0 text-[10px] tracking-[0.35em] text-cyan-300/70 uppercase">Command Center</p>
+      @if (agent(); as a) {
+        <h1 class="m-0 font-display text-2xl tracking-[0.12em] text-white uppercase">
+          {{ a.name }}
+          <span class="text-sm tracking-[0.2em]" [style.color]="factionTint()">{{ a.faction }}</span>
+        </h1>
+        <p class="m-0 text-xs text-white/50">HQ · {{ a.hq }}</p>
+      }
+    </div>
+    <button
+      type="button"
+      class="sk-btn px-6 py-2.5 text-sm tracking-[0.18em] uppercase"
+      (click)="resume()"
+    >
+      {{ resumeLabel() }}
+    </button>
+  </header>
 
-  @if (status(); as s) {
-    <div class="sk-panel mx-auto mt-6 w-full max-w-lg text-left">
-      <p class="sk-panel-heading">Server status</p>
-      <p class="sk-panel-meta">Status: {{ s.status }} · API {{ s.version }}</p>
-      <p class="sk-panel-meta">Last reset: {{ s.resetDate }}</p>
-      @if (s.serverResets) {
-        <p class="sk-panel-meta">Next reset: {{ s.serverResets.next }} ({{ s.serverResets.frequency }})</p>
+  @if (navActivity.shipArrivedAlert() || navActivity.contractExpiringAlert()) {
+    <div class="flex flex-wrap gap-2">
+      @if (navActivity.shipArrivedAlert()) {
+        <button
+          type="button"
+          class="rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200"
+          (click)="goShips()"
+        >
+          Vaisseau arrivé
+        </button>
       }
-      @if (s.stats) {
-        <div class="sk-panel-section">
-          <p class="text-xs text-white/75">
-            {{ s.stats.agents }} agents · {{ s.stats.ships }} ships · {{ s.stats.systems }} systems ·
-            {{ s.stats.waypoints }} waypoints
-          </p>
-        </div>
+      @if (navActivity.contractExpiringAlert()) {
+        <button
+          type="button"
+          class="rounded-full border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-xs text-amber-200"
+          (click)="goContracts()"
+        >
+          Contrat expire bientôt
+        </button>
       }
-      @if (s.announcements?.length) {
-        <div class="sk-panel-section">
-          <p class="mb-2 text-sm text-white/90">Announcements</p>
-          <ul class="max-w-prose space-y-2">
-            @for (a of s.announcements; track a.title) {
+    </div>
+  }
+
+  <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div class="sk-panel">
+      <p class="m-0 text-[10px] tracking-[0.15em] text-white/45 uppercase">Credits</p>
+      <p class="m-0 font-display text-xl text-emerald-300">
+        {{ agentCredits() != null ? formatCompact(agentCredits()!) : '—' }}
+      </p>
+    </div>
+    <div class="sk-panel">
+      <p class="m-0 text-[10px] tracking-[0.15em] text-white/45 uppercase">Revenu / h</p>
+      <p class="m-0 font-display text-xl text-emerald-300">{{ formatCredits(revenuePerHour()) }}<span class="text-xs text-white/40">/h</span></p>
+    </div>
+    <div class="sk-panel">
+      <p class="m-0 text-[10px] tracking-[0.15em] text-white/45 uppercase">Flotte</p>
+      <p class="m-0 font-display text-xl text-cyan-200">
+        {{ fleetSummary().total }}
+        <span class="text-xs text-white/40">· {{ fleetSummary().inTransit }} transit</span>
+      </p>
+    </div>
+    <div class="sk-panel">
+      <p class="m-0 text-[10px] tracking-[0.15em] text-white/45 uppercase">Contrats ouverts</p>
+      <p class="m-0 font-display text-xl text-amber-200">{{ openContracts() }}</p>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
+    <section class="sk-panel">
+      <p class="sk-panel-heading">Carte flotte live</p>
+      <p class="sk-panel-meta mb-3">Système {{ mapSystem() }} · cliquez un vaisseau pour ouvrir la carte</p>
+      @if (mapSystem()) {
+        <app-fleet-mini-map [systemSymbol]="mapSystem()" [ships]="fleet.ships()" />
+      }
+    </section>
+
+    <section class="sk-panel flex flex-col gap-4">
+      <div>
+        <p class="sk-panel-heading">Prochaines actions</p>
+        @if (recommendedActions().length === 0) {
+          <p class="sk-panel-meta">Aucune action urgente — explorez, tradez ou acceptez un contrat.</p>
+        } @else {
+          <ul class="m-0 list-none space-y-2 p-0">
+            @for (action of recommendedActions(); track action.id) {
               <li>
-                <p class="text-sm text-white">{{ a.title }}</p>
-                <p class="text-xs leading-relaxed text-white/75">{{ a.body }}</p>
+                <button
+                  type="button"
+                  class="w-full rounded border border-white/10 bg-black/30 px-3 py-2 text-left transition hover:border-cyan-400/30"
+                  (click)="runAction(action)"
+                >
+                  <p class="m-0 text-sm text-white">{{ action.label }}</p>
+                  <p class="m-0 text-xs text-white/50">{{ action.detail }}</p>
+                </button>
               </li>
             }
           </ul>
-        </div>
+        }
+      </div>
+
+      <div>
+        <p class="sk-panel-heading">Journal récent</p>
+        @if (recentLog().length === 0) {
+          <p class="sk-panel-meta">Le logbook se remplit au fil de vos opérations.</p>
+        } @else {
+          <ul class="m-0 max-h-40 list-none space-y-1.5 overflow-y-auto p-0">
+            @for (entry of recentLog(); track entry.id) {
+              <li class="flex gap-2 text-xs">
+                <span class="shrink-0 text-white/35">{{ formatLogTime(entry.timestamp) }}</span>
+                <span [class]="logCategoryClass(entry.category)">{{ entry.message }}</span>
+              </li>
+            }
+          </ul>
+        }
+      </div>
+    </section>
+  </div>
+
+  @if (status(); as s) {
+    <footer class="sk-panel text-left">
+      <p class="sk-panel-heading">Serveur</p>
+      <p class="sk-panel-meta">
+        {{ s.status }} · API {{ s.version }} · reset {{ s.resetDate }}
+        @if (s.stats) {
+          · {{ s.stats.agents }} agents · {{ s.stats.ships }} ships
+        }
+      </p>
+      @if (s.announcements?.length) {
+        <ul class="mt-2 space-y-1">
+          @for (a of s.announcements!.slice(0, 2); track a.title) {
+            <li class="text-xs text-white/70"><span class="text-white">{{ a.title }}</span> — {{ a.body }}</li>
+          }
+        </ul>
       }
-    </div>
+    </footer>
   } @else if (loading()) {
-    <p class="mt-4 text-sm text-white/75">Loading server status…</p>
+    <p class="text-sm text-white/50">Chargement du centre de commande…</p>
   }
 </div>

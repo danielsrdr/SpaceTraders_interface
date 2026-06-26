@@ -67,6 +67,7 @@ import { DialogService } from '../../shared/services/dialog.service';
 import { PageBackgroundService } from '../../shared/services/page-background.service';
 
 import { SnackbarService } from '../../shared/services/snackbar.service';
+import { ShipCommandContextService } from '../../shared/services/ship-command-context.service';
 import { RadioService } from '../../shared/services/radio.service';
 import { SurfaceWeatherService } from '../../shared/services/surface-weather.service';
 
@@ -162,6 +163,7 @@ import { PostcardOptions } from '../postcard/postcard-canvas';
 import { buildSurfaceTraitProfile } from './three/surface-trait-profile';
 import { type ContractView } from '../../models/contract.model';
 import { SoundService } from '../../shared/services/sound.service';
+import { GhostFleetService } from '../../shared/services/ghost-fleet.service';
 import { resolveSurfaceContractBeacons, type SurfaceContractBeacon } from './three/surface-contract-beacons';
 import { buildSurfacePoiConfig } from './three/surface-poi';
 
@@ -242,7 +244,10 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
   private readonly contractOptimizer = inject(ContractOptimizerService);
 
+  private readonly shipCommandContext = inject(ShipCommandContextService);
+
   private readonly sound = inject(SoundService);
+  readonly ghostFleet = inject(GhostFleetService);
 
 
 
@@ -258,6 +263,10 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly ships = this.fleetStore.ships;
 
+  readonly ghostShipsOnMap = computed(() =>
+    this.ghostFleet.enabled() ? this.ghostFleet.ghostsForSystem(this.systemSymbol()) : [],
+  );
+
   readonly selectedShip = this.fleetStore.selectedShip;
 
   readonly searchQuery = signal('');
@@ -271,6 +280,8 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly landingPlanet = signal<PlanetView | null>(null);
 
   readonly surfaceEntryActive = signal(false);
+
+  readonly launchHandoffActive = signal(false);
 
   readonly shipViewMode = signal<'map' | 'hangar'>('map');
 
@@ -1044,9 +1055,15 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
   onLaunchComplete(): void {
 
+    this.launchHandoffActive.set(true);
+
     this.viewMode.set('flight');
 
     this.detailPanel.set('info');
+
+    this.actionPulse.update((n) => n + 1);
+
+    setTimeout(() => this.launchHandoffActive.set(false), 2200);
 
   }
 
@@ -1059,6 +1076,8 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!planet) return;
 
     if (kind === 'market') {
+
+      await this.loadMarket();
 
       return;
 
@@ -1213,6 +1232,28 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
       this.snackbar.show('Survey objective updated — ruins logged for contract.', 'success', 4000);
 
       this.radio.announce('Ruins survey data uplinked to contract ledger.');
+
+    }
+
+  }
+
+
+
+  onSurfaceCaveMapped(event: { percent: number }): void {
+
+    const planet = this.selectedPlanet();
+
+    if (!planet) return;
+
+    this.logbook.recordCaveMapped(planet.name, event.percent);
+
+    const surveyBeacon = this.surfaceContractBeacons().find((b) => b.kind === 'survey-cave');
+
+    if (surveyBeacon && event.percent >= 50) {
+
+      this.snackbar.show('Survey objective updated — cave network logged for contract.', 'success', 4000);
+
+      this.radio.announce('Cave survey data uplinked to contract ledger.');
 
     }
 
@@ -3223,6 +3264,7 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
 
     this.systemSymbol.set(sysName);
+    this.ghostFleet.setSystem(sysName);
 
     this.selectedPlanet.set(null);
 
@@ -3269,6 +3311,8 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
       const planetViews = waypoints.map(mapWaypoint);
 
       this.planets.set(planetViews);
+
+      this.shipCommandContext.setContext(sysName, planetViews);
 
       this.applyBeginnerDefaults();
 

@@ -13,13 +13,16 @@ import { SoundService } from '../../shared/services/sound.service';
 import { GoodIconComponent } from '../systems/good-icon.component';
 import { goodCategory, goodLabel } from '../systems/trade-good-visuals';
 import { ContractMiniMapComponent } from './contract-mini-map.component';
+import { MissionDirectorPanelComponent } from '../mission-director/mission-director-panel.component';
+import { MissionDirectorService } from '../mission-director/mission-director.service';
+import { factionColor } from '../../shared/faction-colors';
 
 type ContractStatus = 'hold' | 'progress' | 'completed';
 type DeliveryTerm = ContractTerms['deliver'][number];
 
 @Component({
   selector: 'app-contracts',
-  imports: [FormsModule, GoodIconComponent, ContractMiniMapComponent],
+  imports: [FormsModule, GoodIconComponent, ContractMiniMapComponent, MissionDirectorPanelComponent],
   templateUrl: './contracts.component.html',
 })
 export class ContractsComponent implements OnInit {
@@ -31,6 +34,8 @@ export class ContractsComponent implements OnInit {
   private readonly logbook = inject(LogbookStore);
   private readonly sound = inject(SoundService);
   private readonly router = inject(Router);
+  readonly director = inject(MissionDirectorService);
+  readonly factionColor = factionColor;
 
   readonly muted = this.sound.muted;
   readonly celebrate = signal(false);
@@ -153,8 +158,17 @@ export class ContractsComponent implements OnInit {
     try {
       await this.api.acceptContract(contract.id);
       this.discovery.unlockFactions();
-      this.progression.recordContract({ payment: contract.paymentAccepted, faction: contract.faction });
-      this.logbook.recordContract(`Accepted ${contract.type} contract`);
+      const briefing = this.director.briefingForContract(contract);
+      this.progression.recordContract({
+        payment: contract.paymentAccepted,
+        faction: contract.faction,
+        contract,
+        event: 'accept',
+      });
+      this.logbook.recordContract(`Accepted ${contract.type} contract — ${briefing.title}`, undefined, {
+        contractId: contract.id,
+        directorLine: briefing.voiceLine,
+      });
       this.sound.playAccept();
       await this.load();
       this.snackbar.show('Contract accepted', 'success');
@@ -170,8 +184,18 @@ export class ContractsComponent implements OnInit {
     this.fulfillingId.set(contract.id);
     try {
       await this.api.fulfillContract(contract.id);
-      this.progression.recordContract({ payment: contract.paymentFulfill, faction: contract.faction });
-      this.logbook.recordContract(`Fulfilled ${contract.type} contract (+${contract.paymentFulfill.toLocaleString()}c)`);
+      const debrief = this.director.debriefForContract(contract);
+      this.progression.recordContract({
+        payment: contract.paymentFulfill,
+        faction: contract.faction,
+        contract,
+        event: 'fulfill',
+      });
+      this.logbook.recordContract(
+        `Fulfilled ${contract.type} contract (+${contract.paymentFulfill.toLocaleString()}c)`,
+        undefined,
+        { contractId: contract.id, directorLine: debrief.debrief },
+      );
       this.sound.playFulfill();
       this.triggerCelebrate();
       await this.load();
@@ -221,7 +245,14 @@ export class ContractsComponent implements OnInit {
         tradeSymbol,
         units,
       );
-      this.logbook.recordContract(`Delivered ${units} ${tradeSymbol} to ${contract.type} contract`);
+      this.progression.recordContract({
+        faction: contract.faction,
+        contract,
+        event: 'deliver',
+      });
+      this.logbook.recordContract(`Delivered ${units} ${tradeSymbol} to ${contract.type} contract`, undefined, {
+        contractId: contract.id,
+      });
       this.closeDeliver();
       await this.load();
       this.snackbar.show('Cargo delivered', 'success');

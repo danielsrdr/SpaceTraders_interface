@@ -1,0 +1,33 @@
+@if (agentStore.isAuthenticated() && open()) {
+  <div class="fixed inset-0 z-[9998] bg-black/60" (click)="close()"></div>
+  <div
+    class="sk-crt fixed top-1/2 left-1/2 z-[9999] w-[min(92vw,480px)] -translate-x-1/2 -translate-y-1/2"
+    role="dialog"
+    aria-label="Keyboard shortcuts"
+  >
+    <div class="sk-crt-titlebar">
+      <span class="sk-crt-led"></span>
+      <h2 class="m-0 flex-1 text-sm tracking-[0.25em] uppercase">Keyboard shortcuts</h2>
+      <button type="button" class="sk-btn px-2 py-1 text-xs" (click)="close()">Close</button>
+    </div>
+    <div class="sk-crt-body space-y-4">
+      @for (ctx of ['global', 'systems', 'surface']; track ctx) {
+        @if (grouped().get(ctx); as entries) {
+          <section>
+            <h3 class="mb-2 text-[10px] tracking-[0.2em] text-amber-200/80 uppercase">{{ contextLabel(ctx) }}</h3>
+            <ul class="m-0 list-none space-y-1.5 p-0">
+              @for (entry of entries; track entry.keys) {
+                <li class="flex items-center justify-between gap-3 text-xs">
+                  <span class="text-white/75">{{ entry.description }}</span>
+                  <kbd class="rounded border border-white/25 bg-black/40 px-2 py-0.5 font-mono text-[10px] text-white/90">
+                    {{ entry.keys }}
+                  </kbd>
+                </li>
+              }
+            </ul>
+          </section>
+        }
+      }
+    </div>
+  </div>
+}

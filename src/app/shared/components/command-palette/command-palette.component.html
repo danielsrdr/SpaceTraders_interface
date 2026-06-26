@@ -1,0 +1,61 @@
+@if (agentStore.isAuthenticated() && open()) {
+  <div
+    class="fixed inset-0 z-[9998] bg-black/60 backdrop-blur-[2px]"
+    (click)="onBackdropClick()"
+  ></div>
+
+  <div
+    class="sk-crt fixed top-[12vh] left-1/2 z-[9999] w-[min(92vw,560px)] -translate-x-1/2"
+    role="dialog"
+    aria-label="Command palette"
+    (keydown)="onKeydown($event)"
+  >
+    <div class="sk-crt-titlebar">
+      <span class="sk-crt-led"></span>
+      <span class="text-xs tracking-[0.25em] uppercase">Command palette</span>
+      <span class="text-[10px] text-white/45">Ctrl+K</span>
+    </div>
+
+    <div class="sk-crt-body">
+      <input
+        #queryInput
+        class="sk-input mb-3 w-full text-sm"
+        type="search"
+        placeholder="Jump anywhere or run a ship command…"
+        [ngModel]="query()"
+        (ngModelChange)="onQueryChange($event)"
+        autocomplete="off"
+        spellcheck="false"
+      />
+
+      <ul class="m-0 max-h-[50vh] list-none overflow-y-auto p-0">
+        @for (cmd of results(); track cmd.id; let i = $index) {
+          <li>
+            <button
+              type="button"
+              class="flex w-full items-center gap-3 border-b border-white/10 px-2 py-2 text-left transition-colors"
+              [class.bg-accent]="i === selectedIndex()"
+              [class.opacity-50]="cmd.locked"
+              (click)="run(cmd)"
+            >
+              <app-nav-icon [name]="cmd.icon" class="h-5 w-5 shrink-0 opacity-80" />
+              <span class="flex min-w-0 flex-1 flex-col">
+                <span class="truncate text-sm">{{ cmd.label }}</span>
+                @if (cmd.hint) {
+                  <span class="truncate text-[10px] text-white/45">{{ cmd.hint }}</span>
+                }
+              </span>
+              <span class="text-[9px] tracking-widest text-white/35 uppercase">{{ groupLabel(cmd.group) }}</span>
+            </button>
+          </li>
+        } @empty {
+          <li class="px-2 py-4 text-center text-xs text-white/50">No matching commands.</li>
+        }
+      </ul>
+
+      <p class="mt-2 text-[10px] text-white/40">
+        Tip: type <span class="text-white/60">price:IRON_ORE</span> to find the best sell price in your system.
+      </p>
+    </div>
+  </div>
+}

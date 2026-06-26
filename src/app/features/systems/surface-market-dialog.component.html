@@ -1,0 +1,100 @@
+@if (open()) {
+  <div class="fixed inset-0 z-[9998] bg-black/75 backdrop-blur-[2px]" (click)="onClose()"></div>
+  <div
+    class="fixed top-1/2 left-1/2 z-[9999] flex max-h-[min(88vh,640px)] w-[min(96vw,520px)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-amber-500/35 bg-slate-950/98 text-white shadow-[0_0_40px_rgba(251,191,36,0.12)]"
+    role="dialog"
+    aria-labelledby="market-dialog-title"
+  >
+    <header class="flex shrink-0 items-start gap-3 border-b border-amber-500/20 bg-slate-900/80 px-4 py-3">
+      <div
+        class="flex h-14 w-14 shrink-0 flex-col items-center justify-end overflow-hidden rounded-md border border-cyan-500/30 bg-slate-800"
+        aria-hidden="true"
+      >
+        <div class="h-4 w-4 rounded-full bg-cyan-400/90"></div>
+        <div class="mt-0.5 h-8 w-7 rounded-t-sm bg-slate-500"></div>
+      </div>
+      <div class="min-w-0 flex-1">
+        <p class="m-0 text-[10px] tracking-[0.35em] text-amber-400/80 uppercase">Trading post clerk</p>
+        <h2 id="market-dialog-title" class="m-0 truncate font-display text-base tracking-wide text-amber-100">
+          {{ clerkTitle() }}
+        </h2>
+        <p class="m-0 mt-1 text-xs leading-snug text-slate-400">{{ clerkLine() }}</p>
+      </div>
+      <button type="button" class="sk-btn shrink-0 px-2 py-1 text-xs" (click)="onClose()">Esc</button>
+    </header>
+
+    @if (marketPending()) {
+      <div class="flex flex-1 items-center justify-center p-8">
+        <p class="text-sm tracking-widest text-amber-200/70 uppercase">Opening ledger…</p>
+      </div>
+    } @else if (!listings().length) {
+      <div class="flex flex-1 items-center justify-center p-8">
+        <p class="text-sm text-slate-400">No trade goods listed at this post.</p>
+      </div>
+    } @else {
+      <div class="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+        <table class="w-full border-collapse text-left text-xs">
+          <thead class="sticky top-0 bg-slate-950/95 text-[10px] tracking-wider text-slate-500 uppercase">
+            <tr>
+              <th class="py-2 pr-2 font-normal">Good</th>
+              <th class="py-2 pr-2 font-normal">Type</th>
+              <th class="py-2 pr-2 text-right font-normal">Buy</th>
+              <th class="py-2 text-right font-normal">Sell</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of listings(); track row.symbol) {
+              <tr
+                class="cursor-pointer border-t border-white/5 transition hover:bg-amber-500/10"
+                [class.bg-amber-500/15]="selectedSymbol() === row.symbol"
+                (click)="selectSymbol(row.symbol)"
+              >
+                <td class="py-2 pr-2 text-slate-100">{{ goodLabel(row.symbol) }}</td>
+                <td class="py-2 pr-2" [style.color]="typeColor(row.type)">{{ row.type }}</td>
+                <td class="py-2 pr-2 text-right font-mono text-slate-300">
+                  {{ row.purchasePrice ?? '—' }}
+                </td>
+                <td class="py-2 text-right font-mono text-slate-300">
+                  {{ row.sellPrice ?? '—' }}
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <footer class="shrink-0 border-t border-amber-500/20 bg-slate-900/60 px-4 py-3">
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <span class="text-[11px] text-slate-400">
+            Selected:
+            <span class="text-amber-100">{{ goodLabel(selectedSymbol() ?? '—') }}</span>
+          </span>
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] tracking-wider text-slate-500 uppercase">Units</span>
+            <button type="button" class="sk-btn px-2 py-0.5 text-xs" (click)="adjustUnits(-1)">−</button>
+            <span class="min-w-8 text-center font-mono text-sm">{{ units() }}</span>
+            <button type="button" class="sk-btn px-2 py-0.5 text-xs" (click)="adjustUnits(1)">+</button>
+          </div>
+        </div>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            class="sk-btn text-sm"
+            [disabled]="!canBuy()"
+            (click)="submit('buy')"
+          >
+            Buy
+          </button>
+          <button
+            type="button"
+            class="sk-btn text-sm"
+            [disabled]="!canSell()"
+            (click)="submit('sell')"
+          >
+            Sell
+          </button>
+        </div>
+      </footer>
+    }
+  </div>
+}

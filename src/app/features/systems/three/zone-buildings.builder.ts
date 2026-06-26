@@ -1,176 +1,75 @@
 import {
   BoxGeometry,
-  CanvasTexture,
   Color,
   Group,
-  LinearFilter,
   Mesh,
   MeshStandardMaterial,
   PointLight,
-  Sprite,
-  SpriteMaterial,
   Vector3,
 } from 'three';
 import type { MarketData, TradeGoodType } from '../../../models/system.model';
-import {
-  goodColor,
-  goodLabel,
-  supplyToStack,
-  tradeTypeColor,
-  volumeToIntensity,
-} from '../trade-good-visuals';
 import type { SurfaceCollider } from './surface-collider-registry';
 
-export interface MarketStallAnchor {
-  symbol: string;
-  type: TradeGoodType;
+export interface MarketClerkAnchor {
   position: Vector3;
+  /** World-space yaw (radians) the clerk faces — toward the door. */
+  facing: number;
 }
 
 export interface MarketBuildResult {
   group: Group;
-  stalls: MarketStallAnchor[];
+  clerk: MarketClerkAnchor | null;
   colliders: SurfaceCollider[];
 }
 
-// Stall counter footprint (BoxGeometry 2.4 x 1 x 1.4) sitting on the 0.35-high
-// platform, padded slightly to cover legs and crates.
-const STALL_HALF_X = 1.3;
-const STALL_HALF_Z = 0.9;
-const STALL_BASE_Y = 0.35;
-const STALL_TOP_Y = 1.35;
+const BUILDING_W = 12;
+const BUILDING_D = 10;
+const WALL_H = 3.9;
+const DOOR_W = 2.6;
+const CLERK_INTERACT_SQ = 12;
 
-interface StallGood {
-  symbol: string;
-  type: TradeGoodType;
-  tradeVolume?: number;
-  supply?: string;
-  purchasePrice?: number;
-  sellPrice?: number;
+function addBox(
+  group: Group,
+  w: number,
+  h: number,
+  d: number,
+  x: number,
+  y: number,
+  z: number,
+  mat: MeshStandardMaterial,
+  castShadow = true,
+): Mesh {
+  const mesh = new Mesh(new BoxGeometry(w, h, d), mat);
+  mesh.position.set(x, y + h / 2, z);
+  mesh.castShadow = castShadow;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+  return mesh;
 }
 
-const COLUMNS = 4;
-const CELL = 3.6;
-
-function normalizeGoods(market: MarketData | null): StallGood[] {
-  if (!market) return [];
-  if (market.tradeGoods?.length) {
-    return market.tradeGoods.map((g) => ({
-      symbol: g.symbol,
-      type: g.type,
-      tradeVolume: g.tradeVolume,
-      supply: typeof g.supply === 'string' ? g.supply : undefined,
-      purchasePrice: g.purchasePrice,
-      sellPrice: g.sellPrice,
-    }));
-  }
-  const fromList = (list: { symbol: string }[], type: TradeGoodType): StallGood[] =>
-    list.map((g) => ({ symbol: g.symbol, type }));
-  return [
-    ...fromList(market.exports, 'EXPORT'),
-    ...fromList(market.imports, 'IMPORT'),
-    ...fromList(market.exchange, 'EXCHANGE'),
-  ];
-}
-
-function makePriceSprite(good: StallGood): Sprite {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 128;
-  const ctx = canvas.getContext('2d')!;
-  const hex = '#' + new Color(tradeTypeColor(good.type)).getHexString();
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = 'rgba(2, 6, 23, 0.55)';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = hex;
-  ctx.lineWidth = 4;
-  ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
-
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#f8fafc';
-  ctx.font = 'bold 30px sans-serif';
-  ctx.fillText(goodLabel(good.symbol).slice(0, 16), canvas.width / 2, 42);
-
-  ctx.font = '600 22px sans-serif';
-  ctx.fillStyle = hex;
-  ctx.fillText(good.type, canvas.width / 2, 72);
-
-  if (good.purchasePrice != null || good.sellPrice != null) {
-    ctx.font = '600 24px monospace';
-    ctx.fillStyle = '#e2e8f0';
-    const buy = good.purchasePrice != null ? `B ${good.purchasePrice}` : '';
-    const sell = good.sellPrice != null ? `S ${good.sellPrice}` : '';
-    ctx.fillText([buy, sell].filter(Boolean).join('   '), canvas.width / 2, 106);
-  }
-
-  const texture = new CanvasTexture(canvas);
-  texture.minFilter = LinearFilter;
-  texture.magFilter = LinearFilter;
-  const material = new SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
-  const sprite = new Sprite(material);
-  sprite.scale.set(4, 2, 1);
-  return sprite;
-}
-
-function buildStall(local: Vector3, good: StallGood): Group {
-  const stall = new Group();
-  stall.name = `stall-${good.symbol}`;
-  stall.position.copy(local);
-
-  const typeColor = tradeTypeColor(good.type);
-  const intensity = volumeToIntensity(good.tradeVolume);
-
-  const woodMat = new MeshStandardMaterial({ color: 0x92400e, roughness: 0.85 });
-  const counter = new Mesh(new BoxGeometry(2.4, 1, 1.4), woodMat);
-  counter.position.set(0, 0.5, 0);
-  counter.castShadow = true;
-  stall.add(counter);
-
-  const signHeight = 0.4 + intensity * 1.6;
-  const signMat = new MeshStandardMaterial({
-    color: typeColor,
-    emissive: new Color(typeColor),
-    emissiveIntensity: 0.6 + intensity * 1.6,
+function wallCollider(
+  colliders: SurfaceCollider[],
+  originX: number,
+  originZ: number,
+  groundY: number,
+  minX: number,
+  maxX: number,
+  minZ: number,
+  maxZ: number,
+  topY: number,
+): void {
+  colliders.push({
+    kind: 'box',
+    minX: originX + minX,
+    maxX: originX + maxX,
+    minZ: originZ + minZ,
+    maxZ: originZ + maxZ,
+    baseY: groundY,
+    topY: groundY + topY,
   });
-  const sign = new Mesh(new BoxGeometry(2.4, signHeight, 0.18), signMat);
-  sign.position.set(0, 1 + signHeight / 2 + 0.6, -0.6);
-  // Tagged so the surface day/night cycle can boost the glow after dusk.
-  sign.userData['nightGlow'] = signMat.emissiveIntensity;
-  stall.add(sign);
-
-  const post = new MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 });
-  for (const px of [-1.05, 1.05]) {
-    const leg = new Mesh(new BoxGeometry(0.16, 1.6, 0.16), post);
-    leg.position.set(px, 0.8, -0.6);
-    stall.add(leg);
-  }
-
-  const crateColor = goodColor(good.symbol);
-  const crateMat = new MeshStandardMaterial({ color: crateColor, roughness: 0.7 });
-  const crates = supplyToStack(good.supply);
-  for (let i = 0; i < crates; i++) {
-    const row = Math.floor(i / 2);
-    const col = i % 2;
-    const crate = new Mesh(new BoxGeometry(0.55, 0.55, 0.55), crateMat);
-    crate.position.set(-0.35 + col * 0.7, 1.3 + row * 0.6, 0.1);
-    crate.castShadow = true;
-    stall.add(crate);
-  }
-
-  const light = new PointLight(typeColor, 0.6 + intensity * 2.2, 8);
-  light.position.set(0, 2.6, 0.4);
-  // Tagged so the surface day/night cycle ramps the stall lamps on after dusk.
-  light.userData['nightLight'] = light.intensity;
-  stall.add(light);
-
-  const priceSprite = makePriceSprite(good);
-  priceSprite.position.set(0, 3.7, 0);
-  stall.add(priceSprite);
-
-  return stall;
 }
 
+/** Enclosed trading post with a single clerk behind the counter — no floating stall sprites. */
 function marketGroup(
   originX: number,
   originZ: number,
@@ -181,97 +80,170 @@ function marketGroup(
   group.name = 'market-structures';
   group.position.set(originX, groundY, originZ);
 
-  const darkMat = new MeshStandardMaterial({
-    color: 0x1e293b,
-    emissive: new Color(0x0ea5e9),
-    emissiveIntensity: 0.2,
+  const stoneMat = new MeshStandardMaterial({ color: 0x57534e, roughness: 0.92 });
+  const trimMat = new MeshStandardMaterial({
+    color: 0x0ea5e9,
+    emissive: new Color(0x0284c7),
+    emissiveIntensity: 0.35,
+    roughness: 0.5,
+  });
+  const floorMat = new MeshStandardMaterial({ color: 0x292524, roughness: 0.95 });
+  const roofMat = new MeshStandardMaterial({ color: 0x1c1917, roughness: 0.88, metalness: 0.15 });
+  const woodMat = new MeshStandardMaterial({ color: 0x78350f, roughness: 0.85 });
+  const npcBody = new MeshStandardMaterial({ color: 0x64748b, roughness: 0.9 });
+  const npcHead = new MeshStandardMaterial({
+    color: 0xfcd34d,
+    emissive: new Color(0xca8a04),
+    emissiveIntensity: 0.15,
   });
 
-  const goods = normalizeGoods(market);
-  const cols = Math.min(COLUMNS, Math.max(1, goods.length));
-  const rows = Math.max(1, Math.ceil(goods.length / cols));
-  const width = cols * CELL + 2;
-  const depth = rows * CELL + 2;
+  // Interior floor slab
+  addBox(group, BUILDING_W, 0.2, BUILDING_D, BUILDING_W / 2, 0, BUILDING_D / 2, floorMat, false);
 
-  const platform = new Mesh(new BoxGeometry(width, 0.35, depth), darkMat);
-  platform.position.set(width / 2 - 1, 0.18, depth / 2 - 1);
-  platform.receiveShadow = true;
-  group.add(platform);
+  // Perimeter walls (door gap on south / +Z face)
+  const wallT = 0.35;
+  addBox(group, BUILDING_W, WALL_H, wallT, BUILDING_W / 2, 0.2, wallT / 2, stoneMat);
+  addBox(group, wallT, WALL_H, BUILDING_D, wallT / 2, 0.2, BUILDING_D / 2, stoneMat);
+  addBox(group, wallT, WALL_H, BUILDING_D, BUILDING_W - wallT / 2, 0.2, BUILDING_D / 2, stoneMat);
 
-  // District perimeter — warehouses and dock ramps
-  const warehouseMat = new MeshStandardMaterial({ color: 0x334155, roughness: 0.85, metalness: 0.15 });
-  const neonCyan = new Color(0x22d3ee);
-  const neonPink = new Color(0xf472b6);
+  const doorSide = (BUILDING_W - DOOR_W) / 2;
+  addBox(group, doorSide, WALL_H, wallT, doorSide / 2, 0.2, BUILDING_D - wallT / 2, stoneMat);
+  addBox(
+    group,
+    doorSide,
+    WALL_H,
+    wallT,
+    BUILDING_W - doorSide / 2,
+    0.2,
+    BUILDING_D - wallT / 2,
+    stoneMat,
+  );
 
-  for (const [wx, wz, ww, wd] of [
-    [-4, depth / 2 - 1, 5, depth + 2],
-    [width + 1, depth / 2 - 1, 4, depth + 2],
-    [width / 2 - 1, -3, width + 4, 3],
-  ] as const) {
-    const wh = new Mesh(new BoxGeometry(ww, 4.5, wd), warehouseMat);
-    wh.position.set(wx + ww / 2 - 1, 2.6, wz + wd / 2 - 1);
-    wh.castShadow = true;
-    group.add(wh);
+  // Low door header
+  addBox(
+    group,
+    DOOR_W,
+    0.5,
+    wallT,
+    BUILDING_W / 2,
+    WALL_H - 0.25,
+    BUILDING_D - wallT / 2,
+    stoneMat,
+  );
 
-    const strip = new Mesh(
-      new BoxGeometry(ww * 0.9, 0.12, 0.2),
-      new MeshStandardMaterial({
-        color: 0xffffff,
-        emissive: wx < 0 ? neonCyan : neonPink,
-        emissiveIntensity: 0.9,
-      }),
-    );
-    strip.position.set(wx + ww / 2 - 1, 4.2, wz + wd / 2);
-    strip.userData['nightGlow'] = 0.9;
-    group.add(strip);
+  // Roof with slight overhang
+  addBox(group, BUILDING_W + 0.8, 0.35, BUILDING_D + 0.8, BUILDING_W / 2, WALL_H + 0.15, BUILDING_D / 2, roofMat);
 
-    const dockLight = new PointLight(wx < 0 ? 0x22d3ee : 0xf472b6, 0.8, 14);
-    dockLight.position.set(wx + ww / 2 - 1, 3.5, wz + wd / 2 - 1);
-    dockLight.userData['nightLight'] = dockLight.intensity;
-    group.add(dockLight);
+  // Trim band + sign panel above door (mesh, not billboard)
+  const sign = addBox(group, 3.2, 0.55, 0.12, BUILDING_W / 2, WALL_H - 0.35, BUILDING_D - 0.05, trimMat);
+  sign.userData['nightGlow'] = 0.35;
+
+  // Counter spanning interior
+  addBox(group, BUILDING_W - 2.4, 1.05, 0.55, BUILDING_W / 2, 0.2, BUILDING_D * 0.42, woodMat);
+
+  // Clerk behind counter, facing the door (+Z)
+  const clerkLocalX = BUILDING_W / 2;
+  const clerkLocalZ = BUILDING_D * 0.28;
+  const clerkBody = addBox(group, 0.5, 1.05, 0.38, clerkLocalX, 0.2, clerkLocalZ, npcBody);
+  clerkBody.name = 'market-clerk';
+  addBox(group, 0.34, 0.34, 0.34, clerkLocalX, 1.35, clerkLocalZ, npcHead);
+
+  // Crate shelves along side walls
+  const crateColors = [0xb45309, 0x059669, 0x6366f1, 0xdb2777, 0x0891b2, 0xa16207];
+  for (let i = 0; i < 6; i++) {
+    const side = i % 2 === 0 ? 1.2 : BUILDING_W - 1.2;
+    const row = Math.floor(i / 2);
+    const crateMat = new MeshStandardMaterial({ color: crateColors[i]!, roughness: 0.75 });
+    addBox(group, 0.55, 0.55, 0.55, side, 0.2, 2.2 + row * 1.1, crateMat);
+    addBox(group, 0.55, 0.55, 0.55, side, 0.78, 2.75 + row * 1.1, crateMat);
   }
 
-  const ramp = new Mesh(new BoxGeometry(3, 0.25, 5), darkMat);
-  ramp.position.set(-2, 0.12, depth / 2 - 1);
-  ramp.rotation.y = 0.15;
-  group.add(ramp);
+  // Warm interior lamp
+  const lamp = new PointLight(0xfbbf24, 1.1, 14);
+  lamp.position.set(BUILDING_W / 2, WALL_H - 0.6, BUILDING_D / 2);
+  lamp.userData['nightLight'] = lamp.intensity;
+  group.add(lamp);
 
-  const stalls: MarketStallAnchor[] = [];
+  // Exterior pad leading to door
+  addBox(group, 3.5, 0.12, 2.2, BUILDING_W / 2, -0.02, BUILDING_D + 1.1, floorMat, false);
+
   const colliders: SurfaceCollider[] = [];
+  wallCollider(colliders, originX, originZ, groundY, 0, BUILDING_W, 0, wallT, WALL_H + 0.2);
+  wallCollider(
+    colliders,
+    originX,
+    originZ,
+    groundY,
+    0,
+    wallT,
+    wallT,
+    BUILDING_D - wallT,
+    WALL_H + 0.2,
+  );
+  wallCollider(
+    colliders,
+    originX,
+    originZ,
+    groundY,
+    BUILDING_W - wallT,
+    BUILDING_W,
+    wallT,
+    BUILDING_D - wallT,
+    WALL_H + 0.2,
+  );
+  wallCollider(
+    colliders,
+    originX,
+    originZ,
+    groundY,
+    0,
+    doorSide,
+    BUILDING_D - wallT,
+    BUILDING_D,
+    WALL_H + 0.2,
+  );
+  wallCollider(
+    colliders,
+    originX,
+    originZ,
+    groundY,
+    BUILDING_W - doorSide,
+    BUILDING_W,
+    BUILDING_D - wallT,
+    BUILDING_D,
+    WALL_H + 0.2,
+  );
+  wallCollider(
+    colliders,
+    originX,
+    originZ,
+    groundY,
+    doorSide,
+    BUILDING_W - doorSide,
+    BUILDING_D - wallT,
+    BUILDING_D,
+    WALL_H + 0.2,
+  );
+  wallCollider(
+    colliders,
+    originX,
+    originZ,
+    groundY,
+    1.2,
+    BUILDING_W - 1.2,
+    BUILDING_D * 0.38,
+    BUILDING_D * 0.48,
+    1.35,
+  );
 
-  goods.forEach((good, index) => {
-    const col = index % cols;
-    const row = Math.floor(index / cols);
-    const localX = col * CELL;
-    const localZ = row * CELL;
-    const local = new Vector3(localX, 0.35, localZ);
-    group.add(buildStall(local, good));
-    stalls.push({
-      symbol: good.symbol,
-      type: good.type,
-      position: new Vector3(originX + localX, groundY + 1, originZ + localZ),
-    });
-    const worldX = originX + localX;
-    const worldZ = originZ + localZ;
-    colliders.push({
-      kind: 'box',
-      minX: worldX - STALL_HALF_X,
-      maxX: worldX + STALL_HALF_X,
-      minZ: worldZ - STALL_HALF_Z,
-      maxZ: worldZ + STALL_HALF_Z,
-      baseY: groundY + STALL_BASE_Y,
-      topY: groundY + STALL_TOP_Y,
-    });
-  });
+  const clerk: MarketClerkAnchor = {
+    position: new Vector3(originX + clerkLocalX, groundY + 1.75, originZ + clerkLocalZ),
+    facing: Math.PI / 2,
+  };
 
-  if (!goods.length) {
-    const beacon = new PointLight(0x22d3ee, 1.5, 16);
-    beacon.position.set(width / 2, 3, depth / 2);
-    beacon.userData['nightLight'] = beacon.intensity;
-    group.add(beacon);
-  }
+  void market;
 
-  return { group, stalls, colliders };
+  return { group, clerk, colliders };
 }
 
 export function buildMarketStructuresAt(
@@ -281,6 +253,17 @@ export function buildMarketStructuresAt(
   market: MarketData | null = null,
 ): MarketBuildResult {
   return marketGroup(originX, originZ, groundY, market);
+}
+
+export function isNearMarketClerk(
+  cx: number,
+  cz: number,
+  clerk: MarketClerkAnchor | null,
+): boolean {
+  if (!clerk) return false;
+  const dx = cx - clerk.position.x;
+  const dz = cz - clerk.position.z;
+  return dx * dx + dz * dz <= CLERK_INTERACT_SQ;
 }
 
 /** @deprecated Mine surface props are built via mine-pit.builder */

@@ -81,6 +81,22 @@ export class OrderRunnerService {
     this.store.setStatus(shipSymbol, 'idle', undefined);
   }
 
+  /** Run a single order immediately (command palette / quick actions). */
+  async runOnce(shipSymbol: string, order: Order): Promise<void> {
+    if (this.running.has(shipSymbol)) {
+      throw new Error('Ship is busy with auto-pilot');
+    }
+    this.running.add(shipSymbol);
+    const prev = this.store.state(shipSymbol);
+    this.store.setStatus(shipSymbol, 'running', 'Running command');
+    try {
+      await this.execute(shipSymbol, order);
+    } finally {
+      this.store.setStatus(shipSymbol, prev.status === 'running' ? 'running' : 'idle', undefined);
+      this.running.delete(shipSymbol);
+    }
+  }
+
   private async execute(shipSymbol: string, order: Order): Promise<void> {
     switch (order.kind) {
       case 'setFlightMode':

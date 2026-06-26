@@ -88,6 +88,7 @@ import {
   SystemLayout3d,
 } from './three/system-scene.layout';
 import { LandingAnimation } from './three/landing-animation';
+import { factionColor } from '../../shared/faction-colors';
 import { computeMarkerSignature, ShipMarkerManager } from './three/ship-marker.manager';
 import { TransitArcManager } from './three/transit-arc.manager';
 import { disposeObject3D } from './three/three-dispose.util';
@@ -155,11 +156,14 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   readonly selectedCargo = input<ShipCargo | null>(null);
   readonly landingPlanet = input<PlanetView | null>(null);
   readonly landingActive = input(false);
+  readonly launchHandoff = input(false);
   readonly actionPulse = input(0);
   /** Waypoints relevant to active contracts (highlighted in god view). */
   readonly contractWaypoints = input<Set<string>>(new Set<string>());
   /** When set, replays the given past voyage as a deterministic camera flythrough. */
   readonly replayVoyage = input<Voyage | null>(null);
+  /** Other agents rendered as semi-transparent markers (HQ + scan). */
+  readonly ghostShips = input<ShipData[]>([]);
 
   readonly planetClick = output<PlanetView>();
   readonly shipClick = output<ShipData>();
@@ -178,6 +182,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   readonly replayLabel = signal('');
   readonly planetLabels = signal<PlanetScreenLabel[]>([]);
   readonly landingFade = signal(0);
+  readonly launchFade = signal(0);
   readonly showPlanetNames = signal(true);
   readonly godViewFilter = signal<GodViewFilter>('important');
   readonly hoveredPlanet = signal<PlanetView | null>(null);
@@ -242,10 +247,16 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private headLight: PointLight | null = null;
   private readonly systemCenter = new Vector3(0, 0, 0);
   private readonly shipMarkers = new ShipMarkerManager();
+  private readonly ghostShipMarkers = new ShipMarkerManager({
+    ghost: true,
+    blipColorForShip: (ship) =>
+      parseInt(factionColor(ship.registration.factionSymbol).replace('#', ''), 16),
+  });
   private readonly transit = new TransitArcManager();
   private readonly landing = new LandingAnimation();
   /** Structural fingerprint of the last-built marker set; skips redundant rebuilds. */
   private lastMarkerSignature: string | null = null;
+  private lastGhostMarkerSignature: string | null = null;
   /** Skips tearing down the orbit scene when the waypoint list is unchanged. */
   private lastPlanetBuildSignature: string | null = null;
   /** Last focus target; avoids re-snapping the camera on every fleet poll. */
@@ -277,6 +288,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private radarFlashUntil = 0;
   private shakeUntil = 0;
   private shakeSeed = 0;
+  private launchHandoffRunning = false;
   private lastPointerClientX = 0;
   private lastPointerClientY = 0;
 
@@ -597,6 +609,13 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     });
 
     effect(() => {
+      const ghosts = this.ghostShips();
+      const sys = this.systemSymbol();
+      if (!this.sceneReady) return;
+      this.updateGhostMarkers(ghosts, sys);
+    });
+
+    effect(() => {
       const name = this.focusPlanetName();
       if (!this.sceneReady || !name) return;
       this.focusOnPlanet(name);
@@ -662,6 +681,14 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     });
 
     effect(() => {
+      if (!this.launchHandoff() || !this.sceneReady) return;
+      this.launchHandoffRunning = true;
+      this.launchFade.set(1);
+      this.triggerActionPulse();
+      this.radio.announce('Orbital insertion complete.');
+    });
+
+    effect(() => {
       // Repaint the diegetic cockpit gauges when fuel/cargo change.
       this.selectedShip();
       this.selectedCargo();
@@ -705,6 +732,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.resizeObserver?.disconnect();
     this.clearPlanets();
     this.shipMarkers.dispose();
+    this.ghostShipMarkers.dispose();
     this.transit.dispose();
     if (this.shipGroup) disposeShip(this.shipGroup);
     if (this.cockpitControls?.isLocked) this.cockpitControls.unlock();
@@ -798,6 +826,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
     this.scene.add(this.shipMarkers.markers);
     this.scene.add(this.shipMarkers.blips);
+    this.scene.add(this.ghostShipMarkers.markers);
+    this.scene.add(this.ghostShipMarkers.blips);
     this.scene.add(this.transit.arcs);
 
     this.setupComposer();
@@ -1032,6 +1062,20 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.syncFollowShip(fleet, systemSymbol);
   }
 
+  private updateGhostMarkers(ghosts: ShipData[], systemSymbol: string): void {
+    const onMap = shipsOnMap(ghosts, systemSymbol);
+    const signature = computeMarkerSignature(onMap, systemSymbol, null);
+    if (signature === this.lastGhostMarkerSignature) return;
+    this.lastGhostMarkerSignature = signature;
+    this.ghostShipMarkers.rebuild(onMap, null, this.planetByName);
+    this.ghostShipMarkers.applyPositions(
+      this.orbitEngine,
+      this.planetByName,
+      this.fleetBySymbol(onMap),
+      this.orbitEngine.currentTime,
+    );
+  }
+
   private syncLayoutDisplayPositions(): void {
     for (const [symbol, pos] of this.orbitEngine.getAllPositions()) {
       this.layout.displayPositions.set(symbol, { x: pos.x, z: pos.z });
@@ -1062,6 +1106,13 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       this.orbitEngine,
       this.planetByName,
       this.fleetBySymbol(this.ships()),
+      this.orbitEngine.currentTime,
+    );
+
+    this.ghostShipMarkers.applyPositions(
+      this.orbitEngine,
+      this.planetByName,
+      this.fleetBySymbol(this.ghostShips()),
       this.orbitEngine.currentTime,
     );
 
@@ -1483,6 +1534,15 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
         }
       } else if (this.landingFade() !== 0) {
         this.landingFade.set(0);
+      }
+
+      if (this.launchHandoffRunning && !this.landingActive()) {
+        const fade = this.launchFade();
+        if (fade > 0) {
+          this.launchFade.set(Math.max(0, fade - delta / 1.5));
+        } else {
+          this.launchHandoffRunning = false;
+        }
       }
 
       this.updateCamera();

@@ -65,6 +65,16 @@
     @if (mineProgressPct() !== null) {
       <p class="m-0 mt-2 text-[10px] text-cyan-300/80">Mine network {{ mineProgressPct() }}%</p>
     }
+    @if (caveProgressPct() !== null) {
+      <p class="m-0 mt-2 text-[10px] text-indigo-300/80">Cave mapped {{ caveProgressPct() }}%</p>
+    }
+    <div class="exo-radar mt-2 border-t border-cyan-500/20 pt-2">
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-[10px] tracking-wider text-slate-500 uppercase">Footprints</span>
+        <span class="font-mono text-[10px] text-cyan-300/80">{{ explorePct() }}%</span>
+      </div>
+      <canvas #radarCanvas class="mt-1 h-16 w-16 rounded border border-cyan-500/25 bg-slate-950/80"></canvas>
+    </div>
     <div class="exo-jetpack mt-2 flex flex-col gap-1 border-t border-cyan-500/20 pt-2">
       <span class="text-[10px] tracking-wider text-slate-500 uppercase">Jetpack</span>
       <div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-800/80 ring-1 ring-slate-600/40">
