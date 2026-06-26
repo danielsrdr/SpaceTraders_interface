@@ -47,7 +47,6 @@ import { Voyage } from '../../core/state/flight-recorder.store';
 import {
   getStableTransitProgress,
   shipInTransit,
-  shipOrbitOffset,
   shipsOnMap,
 } from './planet-helpers';
 import { buildCelestialBody } from './three/celestial-body.builder';
@@ -78,18 +77,26 @@ import { buildSystemSun } from './three/system-sun.builder';
 import { buildCockpit, type CockpitBuildResult } from './three/cockpit.builder';
 import { createPointerLockControls } from './three/fps-controls';
 import type { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
+import { getMuForBody } from './three/celestial-mass';
+import { shipRenderScale } from './three/render-transform';
+import { ShipDynamicsEngine } from './three/ship-dynamics.engine';
 import { SystemOrbitEngine } from './three/system-orbit.engine';
-import { computeSystemLayout3d, shipOrbitDistance, SystemLayout3d } from './three/system-scene.layout';
+import {
+  bodyViewOffsetForRadius,
+  computeSystemLayout3d,
+  getPlanetSimRadiusKm,
+  SystemLayout3d,
+} from './three/system-scene.layout';
 import { LandingAnimation } from './three/landing-animation';
 import { computeMarkerSignature, ShipMarkerManager } from './three/ship-marker.manager';
 import { TransitArcManager } from './three/transit-arc.manager';
-import { orientAlongArc, sampleTransitArc } from './three/transit-arc.math';
 import { disposeObject3D } from './three/three-dispose.util';
 
 interface PlanetEntry {
   planet: PlanetView;
   group: Group;
   radius: number;
+  simRadiusKm: number;
   spinAxis: Vector3;
   spinRate: number;
   surfaceTarget?: WebGLRenderTarget;
@@ -122,9 +129,8 @@ const GOD_VIEW_FILTERS: GodViewFilter[] = ['important', 'all', 'markets', 'ships
 /** Orbital-motion time-warp multipliers (0 = paused). */
 const TIME_SCALE_OPTIONS = [0, 1, 10, 100] as const;
 
-/** Player ship is rendered at full scale (~4 units); shrink it so it reads as a
- * small vessel next to celestial bodies (MOON r=2.5, PLANET r=5). */
-const PLAYER_SHIP_SCALE = 0.5;
+/** Base hull length in render units before screen-size clamping. */
+const PLAYER_HULL_RENDER_LENGTH = 0.08;
 
 /** Fraction of the scene extent past which a body is rendered at low detail
  * (no atmosphere/glow shells, frozen animated shader). */
@@ -245,6 +251,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   /** Last focus target; avoids re-snapping the camera on every fleet poll. */
   private lastCameraFocusKey: string | null = null;
   private readonly orbitEngine = new SystemOrbitEngine();
+  private readonly shipDynamics = new ShipDynamicsEngine();
   private layout: SystemLayout3d = {
     scale: 2,
     centerX: 0,
@@ -479,11 +486,26 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     // Fly the recorded arc between the (live-moving) endpoints.
     this.orbitEngine.getWorldPosition(voyage.originSymbol, this.shipResolveA);
     this.orbitEngine.getWorldPosition(voyage.destinationSymbol, this.shipResolveB);
-    sampleTransitArc(this.shipResolveA, this.shipResolveB, t, this.shipResolveResult);
-    this.followPosition.copy(this.shipResolveResult);
+    const replayShip = {
+      symbol: voyage.ship,
+      registration: { name: voyage.ship, factionSymbol: '', role: this.playerShipRole ?? 'EXPLORER' },
+      nav: {
+        systemSymbol: voyage.systemSymbol,
+        waypointSymbol: voyage.destinationSymbol,
+        status: 'IN_TRANSIT' as const,
+        flightMode: 'CRUISE' as const,
+        route: {
+          origin: { symbol: voyage.originSymbol, type: 'PLANET', systemSymbol: voyage.systemSymbol, x: 0, y: 0 },
+          destination: { symbol: voyage.destinationSymbol, type: 'PLANET', systemSymbol: voyage.systemSymbol, x: 0, y: 0 },
+          departureTime: new Date(voyage.departureTime).toISOString(),
+          arrival: new Date(voyage.arrivalTime).toISOString(),
+        },
+      },
+    } as ShipData;
+    const pose = this.shipDynamics.sampleTransit(replayShip, this.shipResolveA, this.shipResolveB, t, this.shipGroup);
+    this.followPosition.copy(pose.position);
     this.shipGroup.position.copy(this.followPosition);
     this.shipGroup.visible = true;
-    orientAlongArc(this.shipGroup, this.shipResolveA, this.shipResolveB, t, this.tempVec);
   }
 
   togglePlanetNames(): void {
@@ -842,7 +864,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
     const built = buildProceduralShip(role);
     this.shipGroup = built.root;
-    this.shipGroup.scale.setScalar(PLAYER_SHIP_SCALE);
+    this.shipGroup.scale.setScalar(PLAYER_HULL_RENDER_LENGTH);
     this.thrusterLights = [];
     this.scene?.add(this.shipGroup);
     this.shipGroup.position.copy(this.followPosition);
@@ -923,6 +945,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
         planet,
         group: built.group,
         radius: built.radius,
+        simRadiusKm: getPlanetSimRadiusKm(planet),
         spinAxis: built.spinAxis,
         spinRate: built.spinRate,
         surfaceTarget: built.surfaceTarget,
@@ -1005,7 +1028,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.shipMarkers.rebuild(onMap, selected, this.planetByName);
     this.transit.rebuild(onMap, selected, this.planetByName);
 
-    this.shipMarkers.applyPositions(this.orbitEngine, this.planetByName, this.fleetBySymbol(fleet));
+    this.shipMarkers.applyPositions(this.orbitEngine, this.planetByName, this.fleetBySymbol(fleet), this.orbitEngine.currentTime);
     this.syncFollowShip(fleet, systemSymbol);
   }
 
@@ -1039,6 +1062,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       this.orbitEngine,
       this.planetByName,
       this.fleetBySymbol(this.ships()),
+      this.orbitEngine.currentTime,
     );
 
     if (this.landingActive() && this.landing.target) {
@@ -1077,7 +1101,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
         const t = getStableTransitProgress(ship);
         this.orbitEngine.getWorldPosition(route.origin.symbol, this.shipResolveA);
         this.orbitEngine.getWorldPosition(route.destination.symbol, this.shipResolveB);
-        orientAlongArc(this.shipGroup, this.shipResolveA, this.shipResolveB, t, this.tempVec);
+        this.shipDynamics.sampleTransit(ship, this.shipResolveA, this.shipResolveB, t, this.shipGroup);
         return;
       }
     }
@@ -1093,19 +1117,33 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
         const t = getStableTransitProgress(ship);
         this.orbitEngine.getWorldPosition(route.origin.symbol, this.shipResolveA);
         this.orbitEngine.getWorldPosition(route.destination.symbol, this.shipResolveB);
-        sampleTransitArc(this.shipResolveA, this.shipResolveB, t, this.shipResolveResult);
-        return this.shipResolveResult;
+        const pose = this.shipDynamics.sampleTransit(
+          ship,
+          this.shipResolveA,
+          this.shipResolveB,
+          t,
+        );
+        return this.shipResolveResult.copy(pose.position);
       }
     }
     const entry = this.planetByName.get(ship.nav.waypointSymbol);
     if (!entry) {
       return this.shipResolveResult.copy(this.followPosition);
     }
-    const offset = shipOrbitOffset(0, 1, shipOrbitDistance(entry.radius));
     this.orbitEngine.getWorldPosition(entry.planet.name, this.shipResolveA);
-    return this.shipResolveResult
-      .copy(this.shipResolveA)
-      .add(this.shipResolveB.set(offset.x, entry.radius * 0.35 + 1.5, offset.y));
+    const pose = this.shipDynamics.resolvePose(
+      ship,
+      null,
+      null,
+      this.shipResolveA,
+      entry.simRadiusKm,
+      getMuForBody(entry.planet),
+      this.orbitEngine.currentTime,
+      0,
+      0,
+      1,
+    );
+    return this.shipResolveResult.copy(pose.position);
   }
 
   focusOnShip(ship: ShipData, systemSymbol: string): void {
@@ -1117,7 +1155,23 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   /** Standoff offset placing the ship above and in front of a body, scaled so
    * larger bodies are viewed from proportionally farther away. */
   private bodyViewOffset(radius: number): Vector3 {
-    return this.viewOffsetScratch.set(0, radius * 0.6 + 4, radius * 2.4 + 16);
+    const o = bodyViewOffsetForRadius(radius);
+    return this.viewOffsetScratch.set(o.x, o.y, o.z);
+  }
+
+  /** Keep the player ship visible via screen-space minimum size clamping. */
+  private updatePlayerShipScale(): void {
+    if (!this.shipGroup?.visible || !this.playerShipRole) return;
+    const dist = this.camera.position.distanceTo(this.shipGroup.position);
+    const h = this.renderer.domElement.clientHeight || 600;
+    const scale = shipRenderScale(
+      this.playerShipRole,
+      PLAYER_HULL_RENDER_LENGTH,
+      dist,
+      h,
+      this.camera.fov,
+    );
+    this.shipGroup.scale.setScalar(scale);
   }
 
   private focusOnPlanet(name: string): void {
@@ -1432,6 +1486,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       }
 
       this.updateCamera();
+      this.updatePlayerShipScale();
       this.updatePlanetLabels();
       this.updateThrusters(elapsed);
       this.drawRadar();

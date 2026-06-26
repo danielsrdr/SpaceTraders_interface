@@ -18,6 +18,9 @@ const EMPTY: ProgressSnapshot = {
   biomesSeen: 0,
   stormsWitnessed: 0,
   minesCompleted: 0,
+  weatherCatalogued: 0,
+  ruinsScanned: 0,
+  surfaceSupplyActions: 0,
 };
 
 describe('ACHIEVEMENTS catalog', () => {
@@ -58,6 +61,24 @@ describe('evaluateAchievement', () => {
   it('unlocks footprinter at 1 planet landed', () => {
     const achievement = ACHIEVEMENT_BY_ID.get('footprinter-1')!;
     const result = evaluateAchievement(achievement, { ...EMPTY, planetsLanded: 1 });
+    expect(result.unlocked).toBe(true);
+  });
+
+  it('unlocks storm-chaser at 4 weather types', () => {
+    const achievement = ACHIEVEMENT_BY_ID.get('storm-chaser-4')!;
+    const result = evaluateAchievement(achievement, { ...EMPTY, weatherCatalogued: 4 });
+    expect(result.unlocked).toBe(true);
+  });
+
+  it('unlocks archaeologist at 10 ruins', () => {
+    const achievement = ACHIEVEMENT_BY_ID.get('archaeologist-10')!;
+    const result = evaluateAchievement(achievement, { ...EMPTY, ruinsScanned: 10 });
+    expect(result.unlocked).toBe(true);
+  });
+
+  it('unlocks field-supply at 5 depot actions', () => {
+    const achievement = ACHIEVEMENT_BY_ID.get('field-supply-5')!;
+    const result = evaluateAchievement(achievement, { ...EMPTY, surfaceSupplyActions: 5 });
     expect(result.unlocked).toBe(true);
   });
 });

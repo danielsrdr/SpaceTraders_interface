@@ -1,5 +1,6 @@
 import { Component, effect, inject, input, output, signal } from '@angular/core';
 import { SnackbarService } from '../../shared/services/snackbar.service';
+import { LogbookStore } from '../../core/state/logbook.store';
 import { SurfacePostcardOptions, renderSurfacePostcard } from './surface-postcard-canvas';
 
 interface ShareCapableNavigator {
@@ -20,6 +21,7 @@ export class SurfacePostcardDialogComponent {
   readonly close = output<void>();
 
   private readonly snackbar = inject(SnackbarService);
+  private readonly logbook = inject(LogbookStore);
 
   readonly busy = signal(false);
   readonly dataUrl = signal<string | null>(null);
@@ -82,6 +84,7 @@ export class SurfacePostcardDialogComponent {
     link.href = url;
     link.download = this.filename();
     link.click();
+    this.logbook.recordSurfaceStamp(this.planetName, url);
     this.snackbar.show('Surface stamp downloaded.', 'success');
   }
 
@@ -89,6 +92,7 @@ export class SurfacePostcardDialogComponent {
     if (!this.blob) return;
     try {
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': this.blob })]);
+      this.logbook.recordSurfaceStamp(this.planetName, this.dataUrl() ?? undefined);
       this.snackbar.show('Surface stamp copied to clipboard.', 'success');
     } catch {
       this.snackbar.show('Clipboard not available — use Download instead.', 'warning');
@@ -105,6 +109,7 @@ export class SurfacePostcardDialogComponent {
     }
     try {
       await nav.share({ files: [file], title: 'My surface stamp' });
+      this.logbook.recordSurfaceStamp(this.planetName, this.dataUrl() ?? undefined);
     } catch (error) {
       if (!(error instanceof DOMException && error.name === 'AbortError')) {
         this.snackbar.show('Share failed.', 'error');

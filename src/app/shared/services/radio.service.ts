@@ -120,6 +120,7 @@ export class RadioService {
       case 'siphon':
       case 'trade':
       case 'refuel':
+      case 'surface':
         break;
       default: {
         const _exhaustive: never = category;

@@ -160,6 +160,10 @@ import { PostcardDialogComponent } from '../postcard/postcard-dialog.component';
 
 import { PostcardOptions } from '../postcard/postcard-canvas';
 import { buildSurfaceTraitProfile } from './three/surface-trait-profile';
+import { type ContractView } from '../../models/contract.model';
+import { SoundService } from '../../shared/services/sound.service';
+import { resolveSurfaceContractBeacons, type SurfaceContractBeacon } from './three/surface-contract-beacons';
+import { buildSurfacePoiConfig } from './three/surface-poi';
 
 
 
@@ -237,6 +241,8 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
   private readonly travelExecutor = inject(TravelExecutorService);
 
   private readonly contractOptimizer = inject(ContractOptimizerService);
+
+  private readonly sound = inject(SoundService);
 
 
 
@@ -364,12 +370,30 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly contractWaypoints = signal<Set<string>>(new Set<string>());
 
+  readonly surfaceContractBeacons = signal<SurfaceContractBeacon[]>([]);
+
+  readonly surfaceScanDeposits = signal<unknown[]>([]);
+
+  private activeContracts: ContractView[] = [];
+
   readonly postcardOptions = signal<PostcardOptions | null>(null);
 
   readonly surfaceCaptain = computed(() => {
     const agent = this.agentStore.agent();
     if (!agent) return null;
     return { name: agent.name, faction: agent.faction, credits: agent.credits };
+  });
+
+  readonly surfaceBoardingShip = computed(() => {
+    const planet = this.selectedPlanet();
+    if (!planet) return null;
+    const docked = this.shipsForWaypoint(planet).filter((s) => shipDocked(s));
+    if (!docked.length) return null;
+    const selected = this.selectedShip();
+    if (selected && shipDocked(selected) && shipAtWaypoint(selected, planet.name)) {
+      return selected;
+    }
+    return docked[0] ?? null;
   });
 
   readonly transitTick = signal(0);
@@ -972,6 +996,8 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
     }
 
+    void this.refreshSurfaceContractBeacons();
+
   }
 
   onSurfaceEntryComplete(): void {
@@ -999,6 +1025,8 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
         weather: this.surfaceWeather.event(),
 
       });
+
+      this.logbook.recordSurfaceLand(planet.name, biomes);
 
     }
 
@@ -1175,6 +1203,162 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!planet) return;
 
     this.progression.recordRuinsScanned(planet.name);
+
+    this.logbook.recordRuinsScan(planet.name);
+
+    const surveyBeacon = this.surfaceContractBeacons().find((b) => b.kind === 'survey-ruins');
+
+    if (surveyBeacon) {
+
+      this.snackbar.show('Survey objective updated — ruins logged for contract.', 'success', 4000);
+
+      this.radio.announce('Ruins survey data uplinked to contract ledger.');
+
+    }
+
+  }
+
+
+
+  async onSurfaceContractDeliver(beacon: SurfaceContractBeacon): Promise<void> {
+
+    const planet = this.selectedPlanet();
+
+    if (!planet || beacon.kind !== 'deliver-crate' || !beacon.tradeSymbol) return;
+
+    const shipsHere = this.shipsForWaypoint(planet);
+
+    const ship = shipsHere.find((s) => shipDocked(s)) ?? shipsHere[0];
+
+    if (!ship) {
+
+      this.snackbar.show('Dock a ship at this waypoint to deliver contract cargo', 'error');
+
+      return;
+
+    }
+
+    if (!shipDocked(ship)) {
+
+      try {
+
+        await this.api.dockShip(ship.symbol);
+
+        await this.loadShips();
+
+      } catch (error) {
+
+        this.snackbar.show(error instanceof Error ? error.message : 'Dock failed', 'error');
+
+        return;
+
+      }
+
+    }
+
+    const cargoLine = ship.cargo?.inventory.find((i) => i.symbol === beacon.tradeSymbol);
+
+    const onHand = cargoLine?.units ?? 0;
+
+    if (onHand < 1) {
+
+      this.snackbar.show(`No ${beacon.tradeSymbol} in ${ship.symbol} cargo`, 'error');
+
+      return;
+
+    }
+
+    const units = Math.min(beacon.unitsRemaining ?? 1, onHand);
+
+    try {
+
+      await this.api.deliverContract(beacon.contractId, ship.symbol, beacon.tradeSymbol, units);
+
+      this.logbook.recordSurfaceContract(
+
+        `Delivered ${units} ${beacon.tradeSymbol} from surface`,
+
+        planet.name,
+
+      );
+
+      this.snackbar.show(`Delivered ${units} ${beacon.tradeSymbol}`, 'success');
+
+      this.sound.playFulfill();
+
+      this.radio.announce(`Contract delivery confirmed — ${units} units logged.`);
+
+      const contracts = await this.api.getContracts();
+
+      this.activeContracts = contracts;
+
+      const contract = this.activeContracts.find((c) => c.id === beacon.contractId);
+
+      if (contract && contract.deliver.every((d) => (d.unitsFulfilled ?? 0) >= d.unitsRequired)) {
+
+        await this.api.fulfillContract(beacon.contractId);
+
+        this.progression.recordContract({
+
+          payment: contract.paymentFulfill,
+
+          faction: contract.faction,
+
+          credits: this.agentStore.agent()?.credits,
+
+        });
+
+        this.logbook.recordContract(`Fulfilled ${contract.type} contract from surface`, planet.name);
+
+        this.snackbar.show('Contract fulfilled!', 'success', 5000);
+
+        this.sound.playFulfill();
+
+      }
+
+      await this.refreshSurfaceContractBeacons();
+
+    } catch (error) {
+
+      this.snackbar.show(error instanceof Error ? error.message : 'Delivery failed', 'error');
+
+    }
+
+  }
+
+
+
+  private async refreshSurfaceContractBeacons(): Promise<void> {
+
+    const planet = this.selectedPlanet();
+
+    if (!planet) {
+
+      this.surfaceContractBeacons.set([]);
+
+      return;
+
+    }
+
+    try {
+
+      const raw = await this.api.getContracts();
+
+      this.activeContracts = raw;
+
+      const pois = buildSurfacePoiConfig(planet).pois;
+
+      this.surfaceContractBeacons.set(
+
+        resolveSurfaceContractBeacons(this.activeContracts, planet, pois),
+
+      );
+
+    } catch {
+
+      this.surfaceContractBeacons.set([]);
+
+    }
 
   }
 
@@ -1973,6 +2157,9 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
           waypoint,
           credits: res.data.agent?.credits,
         });
+        if (this.viewMode() === 'surface') {
+          this.progression.recordSurfaceSupplyAction();
+        }
 
       },
 
@@ -2115,6 +2302,7 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
       const response = await this.api.scanSurface(shipSymbol);
 
       this.surfaceScanResults.set(response.data.deposits);
+      this.surfaceScanDeposits.set(response.data.deposits ?? []);
 
       this.detailPanel.set('surface');
 

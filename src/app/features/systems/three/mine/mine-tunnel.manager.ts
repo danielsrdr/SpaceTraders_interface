@@ -62,6 +62,7 @@ export class MineTunnelManager {
   constructor(
     readonly pitConfig: MinePitConfig,
     private readonly seed: number,
+    private readonly depositSymbols: string[] = [],
   ) {
     this.hideMatrix.makeScale(HIDDEN_SCALE, HIDDEN_SCALE, HIDDEN_SCALE);
     this.materials = {
@@ -218,6 +219,18 @@ export class MineTunnelManager {
     this.carveBox(centerX + 2, floorY - 10, centerZ + 8, 3, 3, 8);
     this.carveBox(centerX - 6, floorY - 12, centerZ + 12, 6, 3, 3);
 
+    for (let i = 0; i < this.depositSymbols.length; i++) {
+      let h = this.seed;
+      const sym = this.depositSymbols[i] ?? '';
+      for (let c = 0; c < sym.length; c++) {
+        h = (h * 31 + sym.charCodeAt(c)) | 0;
+      }
+      const ox = (Math.abs(h) % 10) - 5;
+      const oz = (Math.abs(h >> 4) % 12) + 6 + i * 2;
+      const depth = floorY - 8 - (Math.abs(h >> 8) % 6);
+      this.carveBox(centerX + ox, depth, centerZ + oz, 3, 3, 5 + (Math.abs(h >> 12) % 4));
+    }
+
     const blockPositions: Record<TunnelBlockKind, Array<[number, number, number]>> = {
       stone: [],
       ore: [],
@@ -305,7 +318,8 @@ export class MineTunnelManager {
 export function createMineTunnelManager(
   pitConfig: MinePitConfig | null,
   seed: number,
+  depositSymbols: string[] = [],
 ): MineTunnelManager | null {
   if (!pitConfig) return null;
-  return new MineTunnelManager(pitConfig, seed);
+  return new MineTunnelManager(pitConfig, seed, depositSymbols);
 }

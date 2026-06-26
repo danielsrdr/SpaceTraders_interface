@@ -1,6 +1,18 @@
 <div class="relative h-full w-full">
   <div #host class="block h-full w-full cursor-crosshair"></div>
 
+  @if (!entryRunning()) {
+    <app-exo-suit-hud
+      [hazardLevel]="hazardLevel()"
+      [sensorQuality]="sensorQuality()"
+      [weatherEvent]="weatherEvent()"
+      [weatherIntensity]="weatherIntensity()"
+      [jetpackFuel]="jetpackFuel()"
+      [poiCompass]="poiCompass()"
+      [mineProgressPct]="mineProgressPct()"
+    />
+  }
+
   <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-between p-4">
     <div class="text-center">
       <h2 class="font-display text-lg tracking-widest text-emerald-300/90 uppercase">
@@ -9,22 +21,7 @@
       <p class="text-xs text-slate-400">{{ planet().type }}</p>
     </div>
 
-    @if (!entryRunning()) {
-      @if (weatherEvent(); as evt) {
-        <p class="rounded bg-slate-950/80 px-3 py-2 text-xs text-amber-200/90 ring-1 ring-amber-500/30">
-          Surface weather: {{ evt }}
-        </p>
-      }
-      @if (ambienceLabel(); as amb) {
-        <p class="rounded bg-slate-950/70 px-3 py-2 text-xs text-slate-300/90 ring-1 ring-slate-600/40">
-          Ambience: {{ amb }}
-        </p>
-      }
-      @if (mineProgressPct() !== null) {
-        <p class="rounded bg-cyan-950/80 px-3 py-2 text-xs text-cyan-200/90 ring-1 ring-cyan-500/30">
-          Network excavated: {{ mineProgressPct() }}%
-        </p>
-      }
+    @if (!entryRunning() && !launchActive()) {
       @if (marketPending()) {
         <p class="rounded bg-emerald-950/80 px-4 py-3 text-sm text-emerald-200 ring-1 ring-emerald-500/40">
           Market opening…
@@ -44,29 +41,34 @@
       }
     }
 
+    @if (launchActive()) {
+      <p class="rounded bg-sky-950/80 px-4 py-3 font-display text-sm tracking-[0.35em] text-sky-200 ring-1 ring-sky-500/40 uppercase">
+        @if (launchPhaseLabel() === 'levitate') {
+          Repulsors — levitating
+        } @else {
+          Main thrusters — climbing
+        }
+      </p>
+    }
+
     <div class="flex flex-col items-center gap-2">
       @if (!entryRunning() && pointerLocked() && !launchActive()) {
         <button type="button" class="pointer-events-auto sk-btn text-xs" (click)="openStamp()">
           Stamp
         </button>
-        <div class="flex w-32 flex-col items-center gap-1">
-          <span class="text-[10px] tracking-wider text-slate-500 uppercase">Jetpack</span>
-          <div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-800/80 ring-1 ring-slate-600/40">
-            <div
-              class="h-full rounded-full bg-cyan-400/90 transition-[width] duration-75"
-              [style.width.%]="jetpackFuel() * 100"
-            ></div>
-          </div>
-        </div>
       }
-      <p class="text-center text-[11px] text-slate-400/90">
-        WASD: Move · Space: Jump / Jetpack (hold in air) · E: Interact / Mine · Esc: Leave planet
-      </p>
-      <button type="button" class="pointer-events-auto sk-btn" (click)="exit()">Leave planet</button>
+      @if (!launchActive()) {
+        <p class="text-center text-[11px] text-slate-400/90">
+          WASD: Move · Space: Jetpack · E: Interact · Esc: Release cursor
+          @if (landedShipLabel(); as ship) {
+            · Board {{ ship }} to leave
+          }
+        </p>
+      }
     </div>
   </div>
 
-  @if (!entryRunning()) {
+  @if (!entryRunning() && !launchActive()) {
     @for (poi of poiLabels(); track poi.kind) {
       <div
         class="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full"
@@ -89,6 +91,16 @@
     }
   }
 
+  @if (!entryRunning() && !launchActive() && nearLandedShip() && landedShipLabel(); as ship) {
+    <div class="pointer-events-none absolute bottom-24 left-1/2 z-20 -translate-x-1/2">
+      <div class="sk-holo-panel sk-holo-panel--active" data-kind="shipyard">
+        <span class="sk-holo-node"></span>
+        <span>{{ ship }}</span>
+        <span class="sk-holo-key">[E] Board &amp; launch</span>
+      </div>
+    </div>
+  }
+
   @if (!entryRunning() && focusedStall(); as stall) {
     <div class="pointer-events-none absolute bottom-24 left-1/2 z-20 -translate-x-1/2">
       <div class="sk-holo-panel sk-holo-panel--active" data-kind="market">
@@ -101,7 +113,7 @@
     </div>
   }
 
-  @if (!entryRunning()) {
+  @if (!entryRunning() && !launchActive()) {
     <div
       class="pointer-events-none absolute top-1/2 left-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/60"
     ></div>

@@ -12,6 +12,9 @@ export interface ProgressSnapshot {
   biomesSeen: number;
   stormsWitnessed: number;
   minesCompleted: number;
+  weatherCatalogued: number;
+  ruinsScanned: number;
+  surfaceSupplyActions: number;
 }
 
 export interface Achievement {
@@ -145,6 +148,34 @@ const FAMILIES: FamilyDef[] = [
     tiers: [
       { threshold: 1, title: 'Vein Finder', description: 'Fully excavate a planetary mine network.' },
       { threshold: 5, title: 'Deep Core', description: 'Fully excavate mine networks on 5 planets.' },
+    ],
+  },
+  {
+    family: 'storm-chaser',
+    color: '#a855f7',
+    metric: (s) => s.weatherCatalogued,
+    tiers: [
+      { threshold: 2, title: 'Weather Watch', description: 'Witness 2 distinct surface weather events.' },
+      { threshold: 4, title: 'Storm Chaser', description: 'Catalogue all 4 surface weather phenomena.' },
+    ],
+  },
+  {
+    family: 'archaeologist',
+    color: '#10b981',
+    metric: (s) => s.ruinsScanned,
+    tiers: [
+      { threshold: 1, title: 'Relic Hunter', description: 'Complete an artifact survey on 1 planet.' },
+      { threshold: 10, title: 'Archaeologist', description: 'Survey ruins on 10 different worlds.' },
+      { threshold: 50, title: 'Xeno Historian', description: 'Survey ruins on 50 different worlds.' },
+    ],
+  },
+  {
+    family: 'field-supply',
+    color: '#f97316',
+    metric: (s) => s.surfaceSupplyActions,
+    tiers: [
+      { threshold: 5, title: 'Field Refueler', description: 'Complete 5 surface depot supply actions.' },
+      { threshold: 25, title: 'Field Quartermaster', description: 'Complete 25 surface depot supply actions.' },
     ],
   },
 ];

@@ -37,6 +37,7 @@ export class FpsControls {
   private readonly keys = new Set<string>();
   private locked = false;
   private fuel = JETPACK_FUEL_MAX;
+  private surfaceGravity = 22;
 
   get fuelRatio(): number {
     return this.fuel / JETPACK_FUEL_MAX;
@@ -46,11 +47,18 @@ export class FpsControls {
     private readonly camera: PerspectiveCamera,
     private readonly domElement: HTMLElement,
     private readonly controls: PointerLockControls,
+    surfaceGravity = 22,
   ) {
+    this.surfaceGravity = surfaceGravity;
     this.onKeyDown = this.onKeyDown.bind(this);
     this.onKeyUp = this.onKeyUp.bind(this);
     this.onLock = this.onLock.bind(this);
     this.onUnlock = this.onUnlock.bind(this);
+  }
+
+  /** Update gravity from the active waypoint's celestial profile. */
+  setSurfaceGravity(g: number): void {
+    this.surfaceGravity = g;
   }
 
   attach(): void {
@@ -82,7 +90,7 @@ export class FpsControls {
     mode?: FpsCollisionMode,
   ): void {
     const speed = 8;
-    const gravity = 22;
+    const gravity = this.surfaceGravity;
     const playerHeight = 1.7;
     const playerRadius = 0.35;
     const stepHeight = 0.4;

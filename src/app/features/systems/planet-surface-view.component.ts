@@ -19,6 +19,7 @@ import {
   DirectionalLight,
   Fog,
   HemisphereLight,
+  Group,
   Mesh,
   MeshStandardMaterial,
   PCFSoftShadowMap,
@@ -29,8 +30,11 @@ import {
   WebGLRenderer,
 } from 'three';
 import { MarketData, PlanetView, ShipyardData } from '../../models/system.model';
+import type { ShipData } from '../../models/ship.model';
+import type { ContractView } from '../../models/contract.model';
 import { AgentStore } from '../../core/state/agent.store';
 import { SurfaceWeatherService } from '../../shared/services/surface-weather.service';
+import { SurfaceAudioService } from '../../shared/services/surface-audio.service';
 import { SnackbarService } from '../../shared/services/snackbar.service';
 import { RadioService } from '../../shared/services/radio.service';
 import { ProgressionService } from '../progression/progression.service';
@@ -42,6 +46,7 @@ import {
   recordOreBroken,
 } from '../../core/state/mine-progress.store';
 import { createPointerLockControls, FpsControls } from './three/fps-controls';
+import { fpsGravityForPlanet } from './three/celestial-mass';
 import { getActiveZone, SurfaceZone } from './three/surface-zones';
 import { disposeObject3D } from './three/three-dispose.util';
 import { goodLabel } from './trade-good-visuals';
@@ -61,13 +66,30 @@ import {
 } from './three/terrain/terrain-material';
 import { buildSkydome } from './three/surface-props.builder';
 import type { SurfaceZoneKind } from './three/system-view-mode';
-import type { SurfaceTraitProfile } from './three/surface-trait-profile';
-import { resolveSurfaceAmbience, surfaceAmbienceLabel } from './three/surface-ambience';
+import type { SurfaceTraitProfile, SurfaceWeatherKind } from './three/surface-trait-profile';
+import { resolveSurfaceAmbience } from './three/surface-ambience';
+import { nearestPoiInfo, relativePoiBearing, bearingToCardinal } from './three/surface-poi-bearing';
+import { buildContractCrates, type ContractCrateAnchor } from './three/contract-crate.builder';
+import type { SurfaceContractBeacon } from './three/surface-contract-beacons';
+import {
+  buildLandedShipAt,
+  disposeLandedShip,
+  SURFACE_SHIP_SCALE,
+} from './three/surface-landed-ship.builder';
+import {
+  attachLaunchExhaustEffects,
+  type LaunchExhaustEffects,
+} from './three/surface-launch-effects';
+import { ExoSuitHudComponent, type ExoPoiCompass } from './exo-suit-hud/exo-suit-hud.component';
 import { SurfacePostcardDialogComponent } from '../postcard/surface-postcard-dialog.component';
 import type { SurfacePostcardOptions } from '../postcard/surface-postcard-canvas';
 
 /** Seconds for one full surface day -> night -> day cycle. */
 const DAY_LENGTH_S = 150;
+
+/** Boarding launch: levitation hold then climb-out. */
+const LAUNCH_DURATION_S = 5.8;
+const LAUNCH_LEVITATION_END = 0.38;
 
 const SKY_DAY = new Color(0xc7e4ff);
 const SKY_DUSK = new Color(0xe8915a);
@@ -95,7 +117,7 @@ export interface SurfacePoiLabel {
 @Component({
   selector: 'app-planet-surface-view',
   templateUrl: './planet-surface-view.component.html',
-  imports: [SurfacePostcardDialogComponent],
+  imports: [SurfacePostcardDialogComponent, ExoSuitHudComponent],
 })
 export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   readonly planet = input.required<PlanetView>();
@@ -105,8 +127,12 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   readonly market = input<MarketData | null>(null);
   readonly shipyard = input<ShipyardData | null>(null);
   readonly captain = input<{ name: string; faction: string; credits?: number } | null>(null);
+  readonly contractBeacons = input<SurfaceContractBeacon[]>([]);
+  readonly scanDeposits = input<unknown[]>([]);
+  readonly boardingShip = input<ShipData | null>(null);
 
   readonly zoneInteract = output<SurfaceZoneKind>();
+  readonly contractDeliver = output<SurfaceContractBeacon>();
   readonly oreBroken = output<{ blockKey: string }>();
   readonly cartDelivered = output<void>();
   readonly ruinsScanned = output<void>();
@@ -125,8 +151,14 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   readonly tradeUnits = signal(1);
 
   readonly mineProgressPct = signal<number | null>(null);
-  readonly weatherEvent = signal<string | null>(null);
-  readonly ambienceLabel = signal<string | null>(null);
+  readonly weatherEvent = signal<SurfaceWeatherKind | null>(null);
+  readonly hazardLevel = signal(0);
+  readonly sensorQuality = signal(1);
+  readonly weatherIntensity = signal(0);
+  readonly poiCompass = signal<ExoPoiCompass | null>(null);
+  readonly nearLandedShip = signal(false);
+  readonly landedShipLabel = signal<string | null>(null);
+  readonly launchPhaseLabel = signal<'levitate' | 'climb' | null>(null);
   readonly jetpackFuel = signal(1);
   readonly surfacePostcardOptions = signal<SurfacePostcardOptions | null>(null);
 
@@ -136,6 +168,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
 
   private readonly zone = inject(NgZone);
   private readonly surfaceWeather = inject(SurfaceWeatherService);
+  private readonly surfaceAudio = inject(SurfaceAudioService);
   private readonly agentStore = inject(AgentStore);
   private readonly progression = inject(ProgressionService);
   private readonly snackbar = inject(SnackbarService);
@@ -161,15 +194,29 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   private disposed = false;
   private sceneReady = false;
   private launchProgress = 0;
-  private launchStartY = 0;
+  private launchElapsed = 0;
   private launchEmitted = false;
   private entryProgress = 0;
   private entryDuration = 2;
   private entrySeed = 0;
   private builtMarket: MarketData | null = null;
   private builtShipyard: ShipyardData | null = null;
+  private contractCrateAnchors: ContractCrateAnchor[] = [];
+  private builtBeaconKey = '';
+  private builtDepositKey = '';
+  private landedShipGroup: Group | null = null;
+  private landedShipPos = new Vector3();
+  private launchShipBaseY = 0;
+  private launchGroundY = 0;
+  private launchCamAngle = 0;
+  private launchCamStart = new Vector3();
+  private launchEffects: LaunchExhaustEffects | null = null;
+  private launchSequenceStarted = false;
+  private builtBoardingKey = '';
   private activeProfile: SurfaceTraitProfile | null = null;
   private lastZoneKind: SurfaceZoneKind | null = null;
+  private audioStarted = false;
+  private lastAmbienceKey = '';
   private baseFogNear = 60;
   private baseFogFar = 220;
   private readonly projVec = new Vector3();
@@ -197,12 +244,36 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     });
 
     effect(() => {
-      if (!this.sceneReady || !this.launchActive()) return;
-      this.launchProgress = 0;
-      this.launchEmitted = false;
-      this.launchStartY = this.camera.position.y;
-      this.poiLabels.set([]);
-      this.focusedStall.set(null);
+      const deposits = this.scanDeposits();
+      if (!this.sceneReady || !this.world) return;
+      const key = JSON.stringify(deposits);
+      if (key === this.builtDepositKey) return;
+      this.builtDepositKey = key;
+      this.loadWorld(this.planet(), untracked(this.market));
+    });
+
+    effect(() => {
+      const beacons = this.contractBeacons();
+      if (!this.sceneReady || !this.world) return;
+      this.rebuildContractCrates(beacons);
+    });
+
+    effect(() => {
+      const ship = this.boardingShip();
+      if (!this.sceneReady || !this.world) return;
+      this.rebuildLandedShip(ship);
+    });
+
+    effect(() => {
+      const launching = this.launchActive();
+      if (!this.sceneReady) return;
+      if (launching && !this.launchSequenceStarted) {
+        this.launchSequenceStarted = true;
+        this.beginLaunchSequence();
+      }
+      if (!launching) {
+        this.launchSequenceStarted = false;
+      }
     });
   }
 
@@ -219,6 +290,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.disposed = true;
+    this.surfaceAudio.stop();
     this.surfaceWeather.reset();
     cancelAnimationFrame(this.animFrameId);
     this.fps?.detach();
@@ -273,12 +345,64 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
       this.camera.position.set(this.world.spawn.x, this.world.spawn.y, this.world.spawn.z);
       this.camera.rotation.set(0, this.world.spawnHeading, 0);
       this.announceNearestBeacon();
+      this.tryStartAmbience();
     }
     this.zone.run(() => {
       this.entryVeil.set(0);
       this.entryRunning.set(false);
       this.entryComplete.emit();
     });
+  }
+
+  private tryStartAmbience(): void {
+    if (this.audioStarted || !this.activeProfile) return;
+    this.audioStarted = true;
+    const profile = resolveSurfaceAmbience(this.activeProfile, this.surfaceWeather.event());
+    void this.surfaceAudio.start(profile, this.surfaceWeather.event());
+    this.lastAmbienceKey = `${profile.kind}:${this.surfaceWeather.event() ?? 'calm'}`;
+  }
+
+  private syncAmbienceCrossfade(): void {
+    if (!this.activeProfile || !this.audioStarted) return;
+    const profile = resolveSurfaceAmbience(this.activeProfile, this.surfaceWeather.event());
+    const key = `${profile.kind}:${this.surfaceWeather.event() ?? 'calm'}`;
+    if (key === this.lastAmbienceKey) return;
+    this.lastAmbienceKey = key;
+    void this.surfaceAudio.crossfade(profile, this.surfaceWeather.event());
+  }
+
+  private updateHudSignals(zone: SurfaceZone | null): void {
+    const world = this.world;
+    const hazard = this.activeProfile?.hazardLevel ?? 0;
+    const sensor = this.surfaceWeather.sensorQuality;
+    const intensity = this.surfaceWeather.intensity;
+    const evt = this.surfaceWeather.event();
+
+    let compass: ExoPoiCompass | null = null;
+    if (world?.poiAnchors.length) {
+      const info = nearestPoiInfo(this.camera.position.x, this.camera.position.z, world.poiAnchors);
+      if (info) {
+        compass = {
+          label: info.label,
+          relativeBearing: relativePoiBearing(info.bearingDeg, this.camera.rotation.y),
+          distanceM: info.distanceM,
+          cardinal: bearingToCardinal(info.bearingDeg),
+        };
+      }
+    }
+
+    const inMarket = zone?.kind === 'market';
+    const faction = this.planet().faction?.symbol;
+    this.surfaceAudio.setMarketProximity(inMarket, faction);
+    this.surfaceAudio.setStormIntensity(intensity);
+
+    this.hazardLevel.set(hazard);
+    this.sensorQuality.set(sensor);
+    this.weatherIntensity.set(intensity);
+    if (evt !== this.weatherEvent()) {
+      this.weatherEvent.set(evt);
+    }
+    this.poiCompass.set(compass);
   }
 
   private announceNearestBeacon(): void {
@@ -366,8 +490,170 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     this.surfacePostcardOptions.set(null);
   }
 
-  exit(): void {
-    this.zone.run(() => this.exitSurface.emit());
+  private beginLaunchSequence(): void {
+    this.launchProgress = 0;
+    this.launchElapsed = 0;
+    this.launchEmitted = false;
+    this.poiLabels.set([]);
+    this.focusedStall.set(null);
+    this.zone.run(() => {
+      this.nearLandedShip.set(false);
+      this.landedShipLabel.set(null);
+      this.launchPhaseLabel.set('levitate');
+    });
+
+    if (this.fps.isLocked()) {
+      document.exitPointerLock();
+    }
+
+    this.launchCamAngle = this.world?.spawnHeading ?? this.camera.rotation.y;
+    this.launchShipBaseY = this.landedShipGroup?.position.y ?? this.camera.position.y;
+    if (this.landedShipGroup && this.world) {
+      this.launchGroundY = this.world.heightField.getHeight(
+        this.landedShipGroup.position.x,
+        this.landedShipGroup.position.z,
+      );
+    } else {
+      this.launchGroundY = this.launchShipBaseY - 0.55;
+    }
+    this.launchCamStart.copy(this.camera.position);
+
+    if (this.landedShipGroup && this.scene) {
+      this.clearLaunchEffects();
+      this.launchEffects = attachLaunchExhaustEffects(
+        this.scene,
+        this.landedShipGroup,
+        SURFACE_SHIP_SCALE,
+      );
+    }
+
+    this.radio.announce('Launch sequence — repulsors online.');
+    this.surfaceAudio.stop();
+  }
+
+  private clearLaunchEffects(): void {
+    this.launchEffects?.dispose();
+    this.launchEffects = null;
+  }
+
+  private easeInOut(t: number): number {
+    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  }
+
+  private easeInCubic(t: number): number {
+    return t * t * t;
+  }
+
+  private easeOutCubic(t: number): number {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  /** Levitation hold, then nose-up climb with heat ramp. */
+  private sampleLaunchMotion(u: number): {
+    yLift: number;
+    pitch: number;
+    heat: number;
+    phase: 'levitate' | 'climb';
+  } {
+    if (u <= LAUNCH_LEVITATION_END) {
+      const p = u / LAUNCH_LEVITATION_END;
+      const eased = this.easeInOut(p);
+      return {
+        yLift: eased * 4.2,
+        pitch: 0,
+        heat: eased * 0.62,
+        phase: 'levitate',
+      };
+    }
+
+    const p = (u - LAUNCH_LEVITATION_END) / (1 - LAUNCH_LEVITATION_END);
+    const climb = this.easeInCubic(p);
+    const tilt = this.easeOutCubic(Math.min(1, p * 1.15));
+    return {
+      yLift: 4.2 + climb * 98,
+      pitch: -tilt * 0.62,
+      heat: 0.62 + climb * 0.38,
+      phase: 'climb',
+    };
+  }
+
+  private updateLaunch(delta: number): void {
+    this.launchElapsed += delta;
+    this.launchProgress = Math.min(1, this.launchProgress + delta / LAUNCH_DURATION_S);
+    const u = this.launchProgress;
+    const motion = this.sampleLaunchMotion(u);
+    const ship = this.landedShipGroup;
+    const bob =
+      motion.phase === 'levitate'
+        ? Math.sin(this.launchElapsed * 5.5) * 0.18 * (1 - u / LAUNCH_LEVITATION_END)
+        : Math.sin(this.launchElapsed * 9) * 0.04 * (1 - u);
+
+    if (ship) {
+      ship.position.y = this.launchShipBaseY + motion.yLift + bob;
+      ship.rotation.x = motion.pitch;
+
+      const reactors = ship.userData['reactorMeshes'] as Mesh[] | undefined;
+      if (reactors) {
+        const pulse = 0.55 + motion.heat * 2.4 + Math.sin(this.launchElapsed * 24) * 0.25;
+        for (const mesh of reactors) {
+          const mat = mesh.material;
+          if (mat instanceof MeshStandardMaterial) {
+            mat.emissiveIntensity = pulse;
+            mat.emissive.setHex(motion.heat > 0.35 ? 0xff8c42 : 0x0ea5e9);
+          }
+        }
+      }
+
+      this.launchEffects?.update(motion.heat, this.launchElapsed, ship.position, this.launchGroundY);
+
+      const levCamT = motion.phase === 'levitate' ? u / LAUNCH_LEVITATION_END : 1;
+      const climbT = motion.phase === 'climb' ? (u - LAUNCH_LEVITATION_END) / (1 - LAUNCH_LEVITATION_END) : 0;
+
+      const levDist = 11 + levCamT * 4;
+      const levHeight = 2.8 + levCamT * 3.5;
+      const levTarget = new Vector3(
+        ship.position.x + Math.sin(this.launchCamAngle + 0.85) * levDist,
+        ship.position.y + levHeight,
+        ship.position.z + Math.cos(this.launchCamAngle + 0.85) * levDist,
+      );
+
+      if (motion.phase === 'levitate' && levCamT < 0.35) {
+        this.camera.position.lerpVectors(this.launchCamStart, levTarget, levCamT / 0.35);
+      } else {
+        const camDist = 12 + climbT * 18;
+        const camHeight = 3.5 + climbT * 22;
+        this.camera.position.set(
+          ship.position.x + Math.sin(this.launchCamAngle + 0.75) * camDist,
+          ship.position.y + camHeight,
+          ship.position.z + Math.cos(this.launchCamAngle + 0.75) * camDist,
+        );
+      }
+
+      this.camera.lookAt(ship.position.x, ship.position.y + 1.8 + climbT * 8, ship.position.z);
+    } else {
+      this.camera.position.y = this.launchShipBaseY + motion.yLift;
+    }
+
+    const phaseLabel = motion.phase;
+    if (this.launchPhaseLabel() !== phaseLabel) {
+      this.zone.run(() => this.launchPhaseLabel.set(phaseLabel));
+      if (phaseLabel === 'climb') {
+        this.radio.announce('Main thrusters — climbing to orbit.');
+      }
+    }
+
+    const veilT = motion.phase === 'climb' ? (u - LAUNCH_LEVITATION_END) / (1 - LAUNCH_LEVITATION_END) : 0;
+    this.zone.run(() => this.entryVeil.set(Math.max(0, (veilT - 0.5) * 2.4)));
+
+    if (this.launchProgress >= 1 && !this.launchEmitted) {
+      this.launchEmitted = true;
+      this.clearLaunchEffects();
+      this.zone.run(() => {
+        this.entryVeil.set(0);
+        this.launchPhaseLabel.set(null);
+        this.launchComplete.emit();
+      });
+    }
   }
 
   private initScene(): void {
@@ -410,7 +696,12 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     this.scene.add(buildSkydome());
 
     const pointerLock = createPointerLockControls(this.camera, this.renderer.domElement);
-    this.fps = new FpsControls(this.camera, this.renderer.domElement, pointerLock);
+    this.fps = new FpsControls(
+      this.camera,
+      this.renderer.domElement,
+      pointerLock,
+      fpsGravityForPlanet(this.planet()),
+    );
     this.fps.attach();
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -418,8 +709,23 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     this.resize();
   }
 
+  private extractDepositSymbols(deposits: unknown[]): string[] {
+    const symbols: string[] = [];
+    for (const dep of deposits) {
+      if (dep && typeof dep === 'object' && 'symbol' in dep) {
+        const sym = (dep as { symbol?: unknown }).symbol;
+        if (typeof sym === 'string' && sym) symbols.push(sym);
+      }
+    }
+    return symbols;
+  }
+
   private loadWorld(planet: PlanetView, market: MarketData | null): void {
+    this.surfaceAudio.stop();
+    this.audioStarted = false;
+    this.lastAmbienceKey = '';
     this.clearWorld();
+    this.fps?.setSurfaceGravity(fpsGravityForPlanet(planet));
     this.builtMarket = market;
     this.builtShipyard = this.shipyard();
     this.focusedStall.set(null);
@@ -428,12 +734,18 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     const gas = isGasGiantWaypoint(planet);
     this.zone.run(() => this.isGasGiant.set(gas));
 
-    this.world = buildSurfaceWorld(planet, market, this.shipyard());
+    this.world = buildSurfaceWorld(
+      planet,
+      market,
+      this.shipyard(),
+      this.extractDepositSymbols(this.scanDeposits()),
+    );
     this.scene.add(this.world.root);
 
     const profile = this.world.profile;
     this.activeProfile = profile;
     this.surfaceWeather.configure(profile.weatherPool, profile.hazardLevel);
+    this.zone.run(() => this.hazardLevel.set(profile.hazardLevel));
 
     if (gas) {
       this.scene.background = new Color(profile.skyTint);
@@ -471,12 +783,74 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     }
 
     const ambience = resolveSurfaceAmbience(profile, this.surfaceWeather.event());
-    this.zone.run(() => this.ambienceLabel.set(surfaceAmbienceLabel(ambience.kind)));
+    this.lastAmbienceKey = `${ambience.kind}:${this.surfaceWeather.event() ?? 'calm'}`;
 
     this.collectNightEmitters();
+    this.rebuildLandedShip(this.boardingShip());
+  }
+
+  private clearLandedShip(): void {
+    this.clearLaunchEffects();
+    if (this.landedShipGroup) {
+      this.scene?.remove(this.landedShipGroup);
+      disposeLandedShip(this.landedShipGroup);
+      this.landedShipGroup = null;
+    }
+    this.builtBoardingKey = '';
+  }
+
+  private rebuildLandedShip(ship: ShipData | null): void {
+    const world = this.world;
+    if (!world) return;
+
+    const key = ship ? `${ship.symbol}:${ship.registration.role}` : '';
+    if (key === this.builtBoardingKey) return;
+    this.builtBoardingKey = key;
+    this.clearLandedShip();
+
+    if (!ship) {
+      this.zone.run(() => {
+        this.landedShipLabel.set(null);
+        this.nearLandedShip.set(false);
+      });
+      return;
+    }
+
+    const groundY = world.heightField.getHeight(world.spawn.x, world.spawn.z);
+    const built = buildLandedShipAt(
+      world.spawn,
+      world.spawnHeading,
+      groundY,
+      ship.registration.role,
+      ship.symbol,
+    );
+    this.landedShipGroup = built.group;
+    this.landedShipPos.copy(built.position);
+    this.scene.add(built.group);
+    this.zone.run(() => this.landedShipLabel.set(ship.symbol));
+  }
+
+  private tryBoardLandedShip(): boolean {
+    if (!this.landedShipGroup || !this.nearLandedShip() || this.launchActive()) return false;
+    this.zone.run(() => this.exitSurface.emit());
+    return true;
+  }
+
+  private updateLandedShipProximity(): void {
+    if (!this.landedShipGroup || this.launchActive()) {
+      this.zone.run(() => this.nearLandedShip.set(false));
+      return;
+    }
+    const dx = this.camera.position.x - this.landedShipPos.x;
+    const dz = this.camera.position.z - this.landedShipPos.z;
+    const near = dx * dx + dz * dz <= 64;
+    if (near !== this.nearLandedShip()) {
+      this.zone.run(() => this.nearLandedShip.set(near));
+    }
   }
 
   private clearWorld(): void {
+    this.clearLandedShip();
     if (this.world) {
       this.scene.remove(this.world.root);
       disposeSurfaceWorldResult(this.world);
@@ -533,6 +907,53 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     this.collectNightEmitters();
   }
 
+  private rebuildContractCrates(beacons: SurfaceContractBeacon[]): void {
+    const world = this.world;
+    if (!world) return;
+
+    const key = beacons.map((b) => `${b.contractId}:${b.kind}:${b.tradeSymbol ?? ''}`).join('|');
+    if (key === this.builtBeaconKey) return;
+    this.builtBeaconKey = key;
+
+    const existing = world.root.getObjectByName('contract-crates');
+    if (existing) {
+      world.root.remove(existing);
+      disposeObject3D(existing);
+    }
+    world.colliders.removeTag('contract');
+    this.contractCrateAnchors = [];
+
+    if (!beacons.length) return;
+
+    const built = buildContractCrates(
+      beacons,
+      world.pois,
+      (x, z) => world.heightField.getHeight(x, z),
+    );
+    world.root.add(built.group);
+    built.colliders.forEach((c) => world.colliders.add(c, 'contract'));
+    this.contractCrateAnchors = built.anchors;
+  }
+
+  private tryNearestContractCrate(): boolean {
+    const cx = this.camera.position.x;
+    const cz = this.camera.position.z;
+    let best: ContractCrateAnchor | null = null;
+    let bestDist = Infinity;
+    for (const anchor of this.contractCrateAnchors) {
+      const dx = anchor.position.x - cx;
+      const dz = anchor.position.z - cz;
+      const dist = dx * dx + dz * dz;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = anchor;
+      }
+    }
+    if (!best || bestDist > 9) return false;
+    this.zone.run(() => this.contractDeliver.emit(best!.beacon));
+    return true;
+  }
+
   private handleZoneInteract(kind: SurfaceZoneKind): void {
     switch (kind) {
       case 'market':
@@ -554,6 +975,9 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
         break;
       case 'depot':
         this.zone.run(() => this.zoneInteract.emit(kind));
+        break;
+      case 'cave':
+        this.snackbar.show('Cave chamber mapped — deeper strata uncharted.', 'info', 3000);
         break;
       default: {
         const _exhaustive: never = kind;
@@ -579,7 +1003,10 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     if (this.fps.isLocked()) {
       if (this.activeZone()?.kind === 'mine' && this.tryMineBlock()) return;
     }
-    if (!this.fps.isLocked()) this.fps.requestLock();
+    if (!this.fps.isLocked()) {
+      this.fps.requestLock();
+      this.tryStartAmbience();
+    }
   };
 
   private readonly onWheel = (event: WheelEvent): void => {
@@ -593,13 +1020,19 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     if (event.code === 'Escape') {
       if (this.fps.isLocked()) {
         document.exitPointerLock();
-      } else {
-        this.zone.run(() => this.exitSurface.emit());
       }
       return;
     }
 
     if (event.code === 'KeyE') {
+      if (this.tryBoardLandedShip()) {
+        event.preventDefault();
+        return;
+      }
+      if (this.tryNearestContractCrate()) {
+        event.preventDefault();
+        return;
+      }
       const active = this.activeZone();
       if (!active) return;
       event.preventDefault();
@@ -793,12 +1226,10 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
         const evt = this.surfaceWeather.event();
         if (evt !== this.weatherEvent()) {
           this.zone.run(() => {
-            this.weatherEvent.set(evt);
             if (evt && this.activeProfile) {
               this.progression.recordSurfaceWeather(evt);
-              const ambience = resolveSurfaceAmbience(this.activeProfile, evt);
-              this.ambienceLabel.set(surfaceAmbienceLabel(ambience.kind));
             }
+            this.syncAmbienceCrossfade();
           });
         }
       }
@@ -810,14 +1241,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
       }
 
       if (this.launchActive()) {
-        this.launchProgress = Math.min(1, this.launchProgress + delta / 1.2);
-        this.camera.position.y = this.launchStartY + this.launchProgress * 40;
-        if (this.launchProgress >= 1) {
-          if (!this.launchEmitted) {
-            this.launchEmitted = true;
-            this.zone.run(() => this.launchComplete.emit());
-          }
-        }
+        this.updateLaunch(delta);
       } else if (this.world && this.fps.isLocked()) {
         const px = this.camera.position.x;
         const pz = this.camera.position.z;
@@ -867,12 +1291,16 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
           this.pointerLocked.set(true);
           this.poiLabels.set(poi);
           this.focusedStall.set(stall);
+          this.updateHudSignals(zone);
+          this.updateLandedShipProximity();
         });
       } else {
         const poi = this.computePoiLabels(this.activeZone());
         this.zone.run(() => {
           this.pointerLocked.set(this.fps.isLocked());
           this.poiLabels.set(poi);
+          this.updateHudSignals(this.activeZone());
+          this.updateLandedShipProximity();
         });
       }
 

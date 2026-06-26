@@ -198,6 +198,44 @@ function marketGroup(
   platform.receiveShadow = true;
   group.add(platform);
 
+  // District perimeter — warehouses and dock ramps
+  const warehouseMat = new MeshStandardMaterial({ color: 0x334155, roughness: 0.85, metalness: 0.15 });
+  const neonCyan = new Color(0x22d3ee);
+  const neonPink = new Color(0xf472b6);
+
+  for (const [wx, wz, ww, wd] of [
+    [-4, depth / 2 - 1, 5, depth + 2],
+    [width + 1, depth / 2 - 1, 4, depth + 2],
+    [width / 2 - 1, -3, width + 4, 3],
+  ] as const) {
+    const wh = new Mesh(new BoxGeometry(ww, 4.5, wd), warehouseMat);
+    wh.position.set(wx + ww / 2 - 1, 2.6, wz + wd / 2 - 1);
+    wh.castShadow = true;
+    group.add(wh);
+
+    const strip = new Mesh(
+      new BoxGeometry(ww * 0.9, 0.12, 0.2),
+      new MeshStandardMaterial({
+        color: 0xffffff,
+        emissive: wx < 0 ? neonCyan : neonPink,
+        emissiveIntensity: 0.9,
+      }),
+    );
+    strip.position.set(wx + ww / 2 - 1, 4.2, wz + wd / 2);
+    strip.userData['nightGlow'] = 0.9;
+    group.add(strip);
+
+    const dockLight = new PointLight(wx < 0 ? 0x22d3ee : 0xf472b6, 0.8, 14);
+    dockLight.position.set(wx + ww / 2 - 1, 3.5, wz + wd / 2 - 1);
+    dockLight.userData['nightLight'] = dockLight.intensity;
+    group.add(dockLight);
+  }
+
+  const ramp = new Mesh(new BoxGeometry(3, 0.25, 5), darkMat);
+  ramp.position.set(-2, 0.12, depth / 2 - 1);
+  ramp.rotation.y = 0.15;
+  group.add(ramp);
+
   const stalls: MarketStallAnchor[] = [];
   const colliders: SurfaceCollider[] = [];
 

@@ -3,9 +3,11 @@ import {
   apiRelativeOffset,
   computeSystemLayout3d,
   getPlanetRadius3d,
+  getPlanetSimRadiusKm,
   shipMarkerScale,
   shipOrbitDistance,
 } from './system-scene.layout';
+import { ORBIT_ALTITUDE_KM, RENDER_KM_PER_UNIT } from './physics-units';
 
 function makePlanet(name: string, x: number, y: number, type = 'PLANET'): PlanetView {
   return { name, type, system: 'X1-TEST', position: { x, y }, traits: [] };
@@ -39,14 +41,20 @@ describe('computeSystemLayout3d', () => {
 });
 
 describe('getPlanetRadius3d', () => {
-  it('maps known waypoint types to fixed world radii', () => {
-    expect(getPlanetRadius3d(makePlanet('p', 0, 0, 'PLANET'))).toBe(5);
-    expect(getPlanetRadius3d(makePlanet('m', 0, 0, 'MOON'))).toBe(2.5);
-    expect(getPlanetRadius3d(makePlanet('g', 0, 0, 'GAS_GIANT'))).toBe(12);
+  it('maps known waypoint types to render radii derived from sim km', () => {
+    expect(getPlanetRadius3d(makePlanet('p', 0, 0, 'PLANET'))).toBeCloseTo(6_000 / RENDER_KM_PER_UNIT, 6);
+    expect(getPlanetRadius3d(makePlanet('m', 0, 0, 'MOON'))).toBeCloseTo(1_500 / RENDER_KM_PER_UNIT, 6);
+    expect(getPlanetRadius3d(makePlanet('g', 0, 0, 'GAS_GIANT'))).toBeCloseTo(60_000 / RENDER_KM_PER_UNIT, 6);
   });
 
   it('falls back to a default radius for unknown types', () => {
-    expect(getPlanetRadius3d(makePlanet('x', 0, 0, 'MYSTERY_TYPE'))).toBe(3.5);
+    expect(getPlanetRadius3d(makePlanet('x', 0, 0, 'MYSTERY_TYPE'))).toBeCloseTo(4_200 / RENDER_KM_PER_UNIT, 6);
+  });
+});
+
+describe('getPlanetSimRadiusKm', () => {
+  it('returns sim km for a planet type', () => {
+    expect(getPlanetSimRadiusKm(makePlanet('p', 0, 0, 'PLANET'))).toBeGreaterThan(5_000);
   });
 });
 
@@ -63,9 +71,13 @@ describe('shipMarkerScale', () => {
 });
 
 describe('shipOrbitDistance', () => {
-  it('offsets fleet rings outward from the waypoint radius', () => {
-    expect(shipOrbitDistance(10)).toBe(25);
-    expect(shipOrbitDistance(0)).toBe(10);
+  it('offsets fleet rings based on sim radius plus orbit altitude', () => {
+    const simKm = 6_000;
+    const renderR = simKm / RENDER_KM_PER_UNIT;
+    expect(shipOrbitDistance(renderR, simKm)).toBeCloseTo(
+      (simKm + ORBIT_ALTITUDE_KM) / RENDER_KM_PER_UNIT,
+      6,
+    );
   });
 });
 

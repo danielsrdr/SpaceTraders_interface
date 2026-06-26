@@ -1,7 +1,11 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { SpaceTradersApiService } from '../../services/spacetraders-api.service';
 
-export type LogCategory = 'extract' | 'siphon' | 'trade' | 'refuel' | 'contract' | 'navigate';
+export type LogCategory = 'extract' | 'siphon' | 'trade' | 'refuel' | 'contract' | 'navigate' | 'surface';
+
+export interface LogEntryMeta {
+  thumbnail?: string;
+}
 
 export interface LogEntry {
   id: number;
@@ -11,6 +15,7 @@ export interface LogEntry {
   message: string;
   ship?: string;
   waypoint?: string;
+  meta?: LogEntryMeta;
 }
 
 const MAX_ENTRIES = 200;
@@ -32,6 +37,8 @@ export function logCategoryClass(category: LogCategory): string {
       return 'text-emerald-300';
     case 'navigate':
       return 'text-slate-300';
+    case 'surface':
+      return 'text-lime-300';
     default: {
       const _exhaustive: never = category;
       void _exhaustive;
@@ -81,6 +88,7 @@ export class LogbookStore {
     message: string;
     ship?: string;
     waypoint?: string;
+    meta?: LogEntryMeta;
   }): void {
     const timestamp = Date.now();
     const entry: LogEntry = {
@@ -91,6 +99,7 @@ export class LogbookStore {
       message: input.message,
       ship: input.ship,
       waypoint: input.waypoint,
+      meta: input.meta,
     };
     this.entries.update((list) => [...list, entry].slice(-MAX_ENTRIES));
     this.persist();
@@ -146,8 +155,38 @@ export class LogbookStore {
     this.append({ category: 'refuel', ship, waypoint, message: `Refueled${amount} fuel${where}${price}` });
   }
 
-  recordContract(message: string): void {
-    this.append({ category: 'contract', message });
+  recordContract(message: string, waypoint?: string): void {
+    this.append({ category: 'contract', message, waypoint });
+  }
+
+  recordSurfaceLand(planet: string, biomes: string[]): void {
+    const biomeText = biomes.length ? ` — biomes: ${biomes.join(', ')}` : '';
+    this.append({
+      category: 'surface',
+      waypoint: planet,
+      message: `First footprint on ${planet}${biomeText}`,
+    });
+  }
+
+  recordRuinsScan(planet: string): void {
+    this.append({
+      category: 'surface',
+      waypoint: planet,
+      message: `Artifact survey complete — ${planet}`,
+    });
+  }
+
+  recordSurfaceStamp(planet: string, thumbnailDataUrl?: string): void {
+    this.append({
+      category: 'surface',
+      waypoint: planet,
+      message: `Postcard stamped — ${planet}`,
+      meta: thumbnailDataUrl ? { thumbnail: thumbnailDataUrl } : undefined,
+    });
+  }
+
+  recordSurfaceContract(message: string, waypoint?: string): void {
+    this.append({ category: 'surface', message, waypoint });
   }
 
   private dayFor(timestamp: number): number | null {

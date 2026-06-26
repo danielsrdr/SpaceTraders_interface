@@ -54,6 +54,9 @@ export class AchievementsService {
       biomesSeen: this.surfaceDiscovery.biomesSeen().size,
       stormsWitnessed: storms,
       minesCompleted: this.surfaceDiscovery.minesCompleted(),
+      weatherCatalogued: this.surfaceDiscovery.weatherSeen().size,
+      ruinsScanned: this.surfaceDiscovery.ruinsScanned().size,
+      surfaceSupplyActions: this.surfaceDiscovery.surfaceSupplyActions(),
     };
   });
 

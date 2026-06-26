@@ -34,7 +34,11 @@
       [market]="market()"
       [shipyard]="shipyard()"
       [captain]="surfaceCaptain()"
+      [contractBeacons]="surfaceContractBeacons()"
+      [scanDeposits]="surfaceScanDeposits()"
+      [boardingShip]="surfaceBoardingShip()"
       (zoneInteract)="onSurfaceZoneInteract($event)"
+      (contractDeliver)="onSurfaceContractDeliver($event)"
       (oreBroken)="onSurfaceOreBroken($event)"
       (cartDelivered)="onSurfaceCartDelivered()"
       (ruinsScanned)="onSurfaceRuinsScanned()"
@@ -1128,9 +1132,6 @@
         <p class="sk-panel-meta mt-1 mb-0">
           {{ planet.traits!.map((t) => t.name).join(', ') }}
         </p>
-      }
-      @if (viewMode() === 'surface' || viewMode() === 'launch') {
-        <button type="button" class="sk-btn mt-2 w-full" (click)="onExitSurface()">Leave planet</button>
       }
     </div>
   }

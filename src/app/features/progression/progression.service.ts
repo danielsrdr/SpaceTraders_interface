@@ -164,4 +164,8 @@ export class ProgressionService {
   recordRuinsScanned(planetName: string): void {
     this.surfaceDiscovery.markRuinsScanned(planetName);
   }
+
+  recordSurfaceSupplyAction(): void {
+    this.surfaceDiscovery.incrementSupplyAction();
+  }
 }

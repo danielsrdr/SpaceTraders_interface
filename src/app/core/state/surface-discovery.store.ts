@@ -10,6 +10,7 @@ export interface SurfaceDiscoveryState {
   maxMinePercent: Record<string, number>;
   minesCompleted: number;
   totalOresBroken: number;
+  surfaceSupplyActions: number;
 }
 
 const STORAGE_PREFIX = 'sk_surface_discovery_';
@@ -24,6 +25,7 @@ function emptyState(): SurfaceDiscoveryState {
     maxMinePercent: {},
     minesCompleted: 0,
     totalOresBroken: 0,
+    surfaceSupplyActions: 0,
   };
 }
 
@@ -42,6 +44,7 @@ export class SurfaceDiscoveryStore {
   readonly maxMinePercent = signal<Readonly<Record<string, number>>>({});
   readonly minesCompleted = signal(0);
   readonly totalOresBroken = signal(0);
+  readonly surfaceSupplyActions = signal(0);
 
   constructor() {
     effect(() => {
@@ -56,6 +59,7 @@ export class SurfaceDiscoveryStore {
         this.maxMinePercent.set({ ...state.maxMinePercent });
         this.minesCompleted.set(state.minesCompleted);
         this.totalOresBroken.set(state.totalOresBroken);
+        this.surfaceSupplyActions.set(state.surfaceSupplyActions);
       });
     });
   }
@@ -100,6 +104,11 @@ export class SurfaceDiscoveryStore {
     this.persist();
   }
 
+  incrementSupplyAction(): void {
+    this.surfaceSupplyActions.update((n) => n + 1);
+    this.persist();
+  }
+
   getMinePercent(planetName: string): number {
     return this.maxMinePercent()[planetName] ?? 0;
   }
@@ -126,6 +135,7 @@ export class SurfaceDiscoveryStore {
       maxMinePercent: { ...this.maxMinePercent() },
       minesCompleted: this.minesCompleted(),
       totalOresBroken: this.totalOresBroken(),
+      surfaceSupplyActions: this.surfaceSupplyActions(),
     };
     try {
       localStorage.setItem(`${STORAGE_PREFIX}${agent.name}`, JSON.stringify(state));
@@ -151,6 +161,8 @@ export class SurfaceDiscoveryStore {
             : {},
         minesCompleted: typeof parsed.minesCompleted === 'number' ? parsed.minesCompleted : 0,
         totalOresBroken: typeof parsed.totalOresBroken === 'number' ? parsed.totalOresBroken : 0,
+        surfaceSupplyActions:
+          typeof parsed.surfaceSupplyActions === 'number' ? parsed.surfaceSupplyActions : 0,
       };
     } catch {
       return emptyState();

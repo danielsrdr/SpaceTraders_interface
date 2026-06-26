@@ -7,18 +7,25 @@ import {
   Vector3,
 } from 'three';
 import { ShipData } from '../../../models/ship.model';
+import { PlanetView } from '../../../models/system.model';
 import { buildProceduralShip, disposeShip } from '../../ships/ship-procedural.builder';
-import { getStableTransitProgress, shipInTransit, shipOrbitOffset } from '../planet-helpers';
-import { orientAlongArc, sampleTransitArc } from './transit-arc.math';
-import { shipMarkerScale, shipOrbitDistance } from './system-scene.layout';
+import {
+  getStableTransitProgress,
+  shipInOrbit,
+  shipInTransit,
+} from '../planet-helpers';
+import { getMuForBody } from './celestial-mass';
+import { ShipDynamicsEngine } from './ship-dynamics.engine';
+import { shipMarkerScale } from './system-scene.layout';
 import { SystemOrbitEngine } from './system-orbit.engine';
 import { disposeObject3D } from './three-dispose.util';
 
 const BLIP_DOCKED_COLOR = 0x38bdf8;
+const BLIP_ORBIT_COLOR = 0x7dd3fc;
 const BLIP_TRANSIT_COLOR = 0x5eead4;
 
-interface DockedShipMarkerData {
-  kind: 'docked';
+interface StationaryShipMarkerData {
+  kind: 'docked' | 'orbit';
   ship: ShipData;
   waypointSymbol: string;
   orbitIndex: number;
@@ -32,11 +39,13 @@ interface TransitShipMarkerData {
   destSymbol: string;
 }
 
-type ShipMarkerData = DockedShipMarkerData | TransitShipMarkerData;
+type ShipMarkerData = StationaryShipMarkerData | TransitShipMarkerData;
 
 /** Minimal waypoint info the marker manager needs (radius for scale/offset). */
 export interface MarkerPlanetEntry {
   radius: number;
+  simRadiusKm: number;
+  planet: PlanetView;
 }
 
 /** Deterministic phase in [0,1) so markers do not all pulse in lockstep. */
@@ -59,11 +68,15 @@ export class ShipMarkerManager {
 
   private readonly originScratch = new Vector3();
   private readonly destScratch = new Vector3();
-  private readonly orientScratch = new Vector3();
+  private readonly dynamics = new ShipDynamicsEngine();
 
   constructor() {
     this.markers.name = 'ship-markers';
     this.blips.name = 'ship-blips';
+  }
+
+  get dynamicsEngine(): ShipDynamicsEngine {
+    return this.dynamics;
   }
 
   /**
@@ -77,6 +90,7 @@ export class ShipMarkerManager {
   ): void {
     this.clearMarkers();
     this.clearBlips();
+    this.dynamics.clear();
 
     const byWaypoint = new Map<string, ShipData[]>();
     for (const ship of onMap) {
@@ -93,15 +107,19 @@ export class ShipMarkerManager {
 
       shipsAt.forEach((ship, index) => {
         if (ship.symbol === selected) return;
+        const inOrbit = shipInOrbit(ship);
         const marker = this.createShipMarker(ship, shipMarkerScale(entry.radius, false));
         marker.userData['markerData'] = {
-          kind: 'docked',
+          kind: inOrbit ? 'orbit' : 'docked',
           ship,
           waypointSymbol,
           orbitIndex: index,
           orbitTotal: shipsAt.length,
-        } satisfies DockedShipMarkerData;
-        const blip = this.createShipBlip(Math.max(2.5, entry.radius * 0.5), BLIP_DOCKED_COLOR);
+        } satisfies StationaryShipMarkerData;
+        const blip = this.createShipBlip(
+          Math.max(2.5, entry.radius * 0.5),
+          inOrbit ? BLIP_ORBIT_COLOR : BLIP_DOCKED_COLOR,
+        );
         marker.userData['blip'] = blip;
         this.blips.add(blip);
         this.markers.add(marker);
@@ -114,8 +132,6 @@ export class ShipMarkerManager {
       const originPlanet = planetByName.get(route.origin.symbol);
       const destPlanet = planetByName.get(route.destination.symbol);
       if (!originPlanet || !destPlanet) continue;
-      // The selected ship is drawn as the camera-followed shipGroup; its arc is
-      // still drawn by the TransitArcManager, but skip its duplicate marker.
       if (ship.symbol === selected) continue;
 
       const marker = this.createShipMarker(ship, shipMarkerScale(originPlanet.radius, false));
@@ -138,6 +154,7 @@ export class ShipMarkerManager {
     orbitEngine: SystemOrbitEngine,
     planetByName: ReadonlyMap<string, MarkerPlanetEntry>,
     fleetBySymbol: ReadonlyMap<string, ShipData>,
+    simTime: number,
   ): void {
     const originPos = this.originScratch;
     const destPos = this.destScratch;
@@ -146,20 +163,34 @@ export class ShipMarkerManager {
       const data = child.userData['markerData'] as ShipMarkerData | undefined;
       if (!data) continue;
 
-      if (data.kind === 'docked') {
+      if (data.kind === 'docked' || data.kind === 'orbit') {
         const entry = planetByName.get(data.waypointSymbol);
         if (!entry) continue;
-        const orbitR = shipOrbitDistance(entry.radius);
-        const offset = shipOrbitOffset(data.orbitIndex, data.orbitTotal, orbitR);
+        const ship = fleetBySymbol.get(data.ship.symbol) ?? data.ship;
         orbitEngine.getWorldPosition(data.waypointSymbol, originPos);
-        child.position.set(
-          originPos.x + offset.x,
-          originPos.y + entry.radius * 0.35 + 1.5,
-          originPos.z + offset.y,
+        const parentMu = getMuForBody(entry.planet);
+        const pose = this.dynamics.resolvePose(
+          { ...ship, nav: { ...ship.nav, status: data.kind === 'orbit' ? 'IN_ORBIT' : 'DOCKED' } },
+          null,
+          null,
+          originPos,
+          entry.simRadiusKm,
+          parentMu,
+          simTime,
+          0,
+          data.orbitIndex,
+          data.orbitTotal,
+          child,
         );
+        child.position.copy(pose.position);
+        if (data.kind === 'docked') {
+          child.rotation.set(0, Math.PI * 0.12, 0);
+        }
         this.syncBlipToMarker(child);
         continue;
       }
+
+      if (data.kind !== 'transit') continue;
 
       const ship = fleetBySymbol.get(data.ship.symbol) ?? data.ship;
       const route = ship.nav.route;
@@ -171,8 +202,8 @@ export class ShipMarkerManager {
       const t = getStableTransitProgress(ship);
       orbitEngine.getWorldPosition(data.originSymbol, originPos);
       orbitEngine.getWorldPosition(data.destSymbol, destPos);
-      sampleTransitArc(originPos, destPos, t, child.position);
-      orientAlongArc(child, originPos, destPos, t, this.orientScratch);
+      const pose = this.dynamics.sampleTransit(ship, originPos, destPos, t, child);
+      child.position.copy(pose.position);
       this.syncBlipToMarker(child);
     }
   }
@@ -198,6 +229,7 @@ export class ShipMarkerManager {
   dispose(): void {
     this.clearMarkers();
     this.clearBlips();
+    this.dynamics.clear();
   }
 
   private createShipMarker(ship: ShipData, baseScale: number): Group {
@@ -266,7 +298,6 @@ export function computeMarkerSignature(
   const parts = onMap
     .map((s) => {
       const route = s.nav.route;
-      // In transit, waypointSymbol can flicker between polls; the route leg is enough.
       const loc =
         shipInTransit(s) && route
           ? `${route.origin.symbol}>${route.destination.symbol}`

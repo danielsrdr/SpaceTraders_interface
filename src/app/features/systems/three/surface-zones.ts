@@ -33,7 +33,7 @@ export function getActiveZone(x: number, y: number, z: number, zones: SurfaceZon
 function zoneAabbForKind(kind: SurfaceZoneKind, x: number, z: number): Aabb {
   switch (kind) {
     case 'market':
-      return { minX: x - 2, maxX: x + 14, minY: 0, maxY: 12, minZ: z - 2, maxZ: z + 14 };
+      return { minX: x - 6, maxX: x + 18, minY: 0, maxY: 14, minZ: z - 6, maxZ: z + 18 };
     case 'mine':
       return {
         minX: x - PIT_RADIUS,
@@ -49,6 +49,8 @@ function zoneAabbForKind(kind: SurfaceZoneKind, x: number, z: number): Aabb {
       return { minX: x - 8, maxX: x + 8, minY: 0, maxY: 12, minZ: z - 8, maxZ: z + 8 };
     case 'depot':
       return { minX: x - 6, maxX: x + 10, minY: 0, maxY: 10, minZ: z - 6, maxZ: z + 10 };
+    case 'cave':
+      return { minX: x - 4, maxX: x + 4, minY: 0, maxY: 8, minZ: z - 4, maxZ: z + 4 };
     default: {
       const _exhaustive: never = kind;
       return _exhaustive;
@@ -94,5 +96,6 @@ export function buildSurfaceZonesLegacy(
     shipyard: null,
     ruins: null,
     depot: null,
+    cave: null,
   });
 }

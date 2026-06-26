@@ -27,8 +27,13 @@ export class SurfaceWeatherService {
 
   /** 0 = calm, 1 = peak intensity — modulates fog density. */
   intensity = 0;
+
   /** 1 = clear sensors; dips during acid rain / sand storms. */
-  sensorQuality = 1;
+  readonly sensorQualitySig = signal(1);
+
+  get sensorQuality(): number {
+    return this.sensorQualitySig();
+  }
 
   private pool: SurfaceWeatherKind[] = ['sand-storm'];
   private hazardLevel = 0;
@@ -42,7 +47,7 @@ export class SurfaceWeatherService {
     this.current = null;
     this.event.set(null);
     this.intensity = 0;
-    this.sensorQuality = 1;
+    this.sensorQualitySig.set(1);
     this.nextAtMs = 0;
     this.configured = true;
   }
@@ -51,7 +56,7 @@ export class SurfaceWeatherService {
     this.current = null;
     this.event.set(null);
     this.intensity = 0;
-    this.sensorQuality = 1;
+    this.sensorQualitySig.set(1);
     this.nextAtMs = 0;
     this.configured = false;
   }
@@ -78,8 +83,8 @@ export class SurfaceWeatherService {
     }
 
     this.intensity = this.intensity > 0.001 ? this.intensity * 0.92 : 0;
-    this.sensorQuality =
-      this.sensorQuality < 0.999 ? this.sensorQuality + (1 - this.sensorQuality) * 0.05 : 1;
+    const sq = this.sensorQualitySig();
+    this.sensorQualitySig.set(sq < 0.999 ? sq + (1 - sq) * 0.05 : 1);
   }
 
   private startEvent(nowMs: number): void {
@@ -98,24 +103,24 @@ export class SurfaceWeatherService {
         const rise = Math.min(1, t / 0.2);
         const decay = 1 - Math.max(0, (t - 0.2) / 0.8);
         this.intensity = Math.max(0, rise * decay);
-        this.sensorQuality = 1 - this.intensity * (0.35 + this.hazardLevel * 0.15);
+        this.sensorQualitySig.set(1 - this.intensity * (0.35 + this.hazardLevel * 0.15));
         break;
       }
       case 'acid-rain': {
         const dip = Math.sin(Math.min(1, t) * Math.PI);
         this.intensity = dip * 0.85;
-        this.sensorQuality = 1 - dip * (0.45 + this.hazardLevel * 0.25);
+        this.sensorQualitySig.set(1 - dip * (0.45 + this.hazardLevel * 0.25));
         break;
       }
       case 'aurora': {
         this.intensity = 0.35 + 0.25 * Math.sin(t * Math.PI * 4);
-        this.sensorQuality = 1;
+        this.sensorQualitySig.set(1);
         break;
       }
       case 'giant-winds': {
         const pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 2);
         this.intensity = pulse * 0.7;
-        this.sensorQuality = 1 - pulse * 0.1;
+        this.sensorQualitySig.set(1 - pulse * 0.1);
         break;
       }
       default: {

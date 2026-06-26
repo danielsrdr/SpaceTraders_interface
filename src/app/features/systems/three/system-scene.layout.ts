@@ -1,5 +1,12 @@
 import { PlanetView, Position } from '../../../models/system.model';
-import { resolveWaypointType } from '../planet-helpers';
+import { getSimRadiusKm } from './celestial-mass';
+import {
+  bodyViewRenderOffset,
+  renderRadius,
+  shipMarkerRenderScale,
+  shipOrbitRenderDistance,
+  shipOrbitVerticalOffset,
+} from './render-transform';
 
 export interface SystemLayout3d {
   scale: number;
@@ -9,26 +16,6 @@ export interface SystemLayout3d {
   displayPositions: Map<string, { x: number; z: number }>;
   sceneExtent: number;
 }
-
-/** Absolute world radii — not tied to coordinate spread. */
-const TYPE_WORLD_RADIUS: Record<string, number> = {
-  PLANET: 5,
-  GAS_GIANT: 12,
-  MOON: 2.5,
-  ORBITAL_STATION: 2.2,
-  JUMP_GATE: 3.5,
-  ASTEROID: 1.8,
-  ASTEROID_FIELD: 7,
-  ASTEROID_BASE: 4.5,
-  ENGINEERED_ASTEROID: 3.2,
-  NEBULA: 10,
-  DEBRIS_FIELD: 5.5,
-  GRAVITY_WELL: 4,
-  ARTIFICIAL_GRAVITY_WELL: 4,
-  ARTIFICAL_GRAVITY_WELL: 4,
-  FUEL_STATION: 1.6,
-  ARTIFACT: 3.5,
-};
 
 export function computeSystemLayout3d(planets: PlanetView[]): SystemLayout3d {
   if (!planets.length) {
@@ -111,18 +98,34 @@ export function planetWorldPosition3d(
   return worldPosition3d(planet.position, layout);
 }
 
+/** Render radius in Three.js world units, derived from sim km + type profile. */
 export function getPlanetRadius3d(planet: PlanetView, _layout?: SystemLayout3d): number {
-  const resolved = resolveWaypointType(planet.type);
-  return TYPE_WORLD_RADIUS[resolved] ?? 3.5;
+  return renderRadius(getSimRadiusKm(planet), 'local');
+}
+
+/** Sim radius in km for physics calculations. */
+export function getPlanetSimRadiusKm(planet: PlanetView): number {
+  return getSimRadiusKm(planet);
 }
 
 /** Ship marker scale relative to nearby waypoint radius. */
 export function shipMarkerScale(waypointRadius: number, selected: boolean): number {
-  const base = Math.min(0.35, Math.max(0.1, waypointRadius * 0.045));
-  return selected ? base * 1.25 : base;
+  return shipMarkerRenderScale(waypointRadius, selected);
 }
 
-/** Orbit ring distance for fleet markers around a waypoint. */
-export function shipOrbitDistance(waypointRadius: number): number {
-  return waypointRadius * 1.5 + 10;
+/** Orbit ring distance for fleet markers around a waypoint (render units). */
+export function shipOrbitDistance(waypointRenderRadius: number, simRadiusKm?: number): number {
+  const simR = simRadiusKm ?? waypointRenderRadius * 1_200;
+  return shipOrbitRenderDistance(waypointRenderRadius, simR);
+}
+
+/** Vertical offset for docked / orbiting ships above the equatorial plane. */
+export function shipOrbitHeightOffset(waypointRenderRadius: number): number {
+  return shipOrbitVerticalOffset(waypointRenderRadius);
+}
+
+/** Camera standoff from a body centre (render units). */
+export function bodyViewOffsetForRadius(bodyRenderRadius: number): { x: number; y: number; z: number } {
+  const v = bodyViewRenderOffset(bodyRenderRadius);
+  return { x: v.x, y: v.y, z: v.z };
 }

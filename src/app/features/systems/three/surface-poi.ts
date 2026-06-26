@@ -11,6 +11,7 @@ export interface PoiPositions {
   shipyard: { x: number; z: number } | null;
   ruins: { x: number; z: number } | null;
   depot: { x: number; z: number } | null;
+  cave: { x: number; z: number } | null;
 }
 
 export interface SurfacePoiConfig {
@@ -28,7 +29,7 @@ export interface SurfacePoiConfig {
 }
 
 function emptyPoiPositions(): PoiPositions {
-  return { market: null, mine: null, shipyard: null, ruins: null, depot: null };
+  return { market: null, mine: null, shipyard: null, ruins: null, depot: null, cave: null };
 }
 
 function projectPoiPositions(pois: SurfacePoiDefinition[]): PoiPositions {

@@ -1,0 +1,88 @@
+@if (sensorDegraded() || weatherEvent()) {
+  <div
+    class="pointer-events-none absolute inset-0 z-10"
+    [style.opacity]="vignetteOpacity()"
+    style="background: radial-gradient(circle at 50% 45%, transparent 38%, rgba(8, 12, 24, 0.6) 100%)"
+  ></div>
+}
+
+@if (stormOverlay(); as storm) {
+  <div
+    class="pointer-events-none absolute inset-0 z-[11]"
+    [class.exo-storm-sand]="storm === 'sand'"
+    [class.exo-storm-acid]="storm === 'acid'"
+    [class.exo-storm-wind]="storm === 'wind'"
+    [style.opacity]="weatherIntensity() * 0.55"
+  ></div>
+}
+
+<div class="pointer-events-none absolute top-20 right-4 z-20 w-56">
+  <div class="sk-holo-panel exo-suit-panel" data-kind="hud">
+    <div class="exo-gauge-row">
+      <span class="exo-gauge-label">Hazard</span>
+      <div class="exo-gauge-track">
+        <div class="exo-gauge-fill exo-gauge-fill--hazard" [style.width.%]="hazardPct()"></div>
+      </div>
+      <span class="exo-gauge-value">{{ hazardPct() }}%</span>
+    </div>
+    <div class="exo-gauge-row">
+      <span class="exo-gauge-label">Sensors</span>
+      <div class="exo-gauge-track">
+        <div
+          class="exo-gauge-fill exo-gauge-fill--sensor"
+          [class.exo-gauge-fill--warn]="sensorDegraded()"
+          [style.width.%]="sensorPct()"
+        ></div>
+      </div>
+      <span class="exo-gauge-value">{{ sensorPct() }}%</span>
+    </div>
+    @if (sensorDegraded()) {
+      <p class="exo-warn m-0 mt-1 text-[10px] tracking-wide text-rose-300/90">
+        @if (weatherEvent() === 'acid-rain') {
+          Acid rain — surface scan degraded
+        } @else if (weatherEvent() === 'sand-storm') {
+          Sand storm — visibility and scan reduced
+        } @else if (weatherEvent() === 'giant-winds') {
+          Upper winds — sensor drift
+        } @else {
+          Sensors degraded
+        }
+      </p>
+    }
+    @if (poiCompass(); as poi) {
+      <div class="exo-compass mt-2 flex items-center gap-2 border-t border-cyan-500/20 pt-2">
+        <span
+          class="exo-compass-arrow inline-block text-lg text-cyan-300"
+          [style.transform]="'rotate(' + poi.relativeBearing + 'deg)'"
+          aria-hidden="true"
+        >↑</span>
+        <span class="text-[11px] text-cyan-100/90">
+          {{ poi.cardinal }} · {{ poi.label }}
+          <span class="text-slate-400">{{ poi.distanceM | number: '1.0-0' }}m</span>
+        </span>
+      </div>
+    }
+    @if (mineProgressPct() !== null) {
+      <p class="m-0 mt-2 text-[10px] text-cyan-300/80">Mine network {{ mineProgressPct() }}%</p>
+    }
+    <div class="exo-jetpack mt-2 flex flex-col gap-1 border-t border-cyan-500/20 pt-2">
+      <span class="text-[10px] tracking-wider text-slate-500 uppercase">Jetpack</span>
+      <div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-800/80 ring-1 ring-slate-600/40">
+        <div
+          class="h-full rounded-full bg-cyan-400/90 transition-[width] duration-75"
+          [style.width.%]="jetpackFuel() * 100"
+        ></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+@if (weatherEvent(); as evt) {
+  <div class="pointer-events-none absolute top-16 left-1/2 z-20 -translate-x-1/2">
+    <span
+      class="rounded bg-amber-950/70 px-2.5 py-1 font-display text-[11px] tracking-[0.35em] text-amber-200/90 uppercase ring-1 ring-amber-400/50"
+    >
+      {{ evt }}
+    </span>
+  </div>
+}

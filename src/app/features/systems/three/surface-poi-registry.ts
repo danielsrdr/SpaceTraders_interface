@@ -84,6 +84,16 @@ const POI_RULES: PoiRule[] = [
       z: -14 - ((seed >> 16) % 6),
     }),
   },
+  {
+    kind: 'cave',
+    label: 'Cave',
+    priority: 45,
+    matches: (p) => !isGasGiantWaypoint(p) && (planetSeedInt(p.name) >> 18) % 3 === 0,
+    position: (seed) => ({
+      x: 18 + ((seed >> 20) % 10),
+      z: 14 + ((seed >> 24) % 10),
+    }),
+  },
 ];
 
 /** Resolve which surface POIs to spawn for a waypoint from traits and type. */

@@ -24,6 +24,8 @@ import { buildMarketStructuresAt, MarketStallAnchor } from './zone-buildings.bui
 import { buildShipyardStructuresAt } from './zone-shipyard.builder';
 import { buildRuinsStructuresAt } from './zone-ruins.builder';
 import { buildDepotStructuresAt } from './zone-depot.builder';
+import { buildSiphonPlatformAt } from './zone-siphon.builder';
+import { buildCaveStructuresAt } from './zone-cave.builder';
 import { createTerrainHeightField, TerrainHeightField } from './terrain/terrain-height';
 import { applyTerrainProfile } from './terrain/terrain-material';
 import { createTerrainChunkManager, TerrainChunkManager } from './terrain/terrain-chunk.manager';
@@ -44,6 +46,7 @@ const POI_BEACON_COLORS: Record<SurfaceZoneKind, number> = {
   shipyard: 0x06b6d4,
   ruins: 0x10b981,
   depot: 0xea580c,
+  cave: 0x6366f1,
 };
 
 export interface SurfaceWorldResult {
@@ -56,6 +59,7 @@ export interface SurfaceWorldResult {
   colliders: SurfaceColliderRegistry;
   zones: SurfaceZone[];
   poiAnchors: SurfacePoiAnchor[];
+  pois: SurfacePoiDefinition[];
   marketStalls: MarketStallAnchor[];
   marketOrigin: { x: number; z: number; baseY: number } | null;
   shipyardOrigin: { x: number; z: number; baseY: number } | null;
@@ -113,6 +117,8 @@ function beaconPositionForPoi(poi: SurfacePoiDefinition, baseY: number): Vector3
       return new Vector3(poi.position.x, baseY + 5, poi.position.z);
     case 'depot':
       return new Vector3(poi.position.x + 2, baseY + 5, poi.position.z + 2);
+    case 'cave':
+      return new Vector3(poi.position.x, baseY + 4, poi.position.z);
     default: {
       const _exhaustive: never = poi.kind;
       return _exhaustive;
@@ -144,11 +150,16 @@ export function buildSurfaceWorld(
   planet: PlanetView,
   market: MarketData | null = null,
   shipyard: ShipyardData | null = null,
+  scanDepositSymbols: string[] = [],
 ): SurfaceWorldResult {
   const poiConfig = buildSurfacePoiConfig(planet);
   const heightField = createTerrainHeightField(poiConfig);
   const terrainManager = createTerrainChunkManager(heightField, poiConfig);
-  const tunnels = createMineTunnelManager(heightField.getPitConfig(), poiConfig.seed);
+  const tunnels = createMineTunnelManager(
+    heightField.getPitConfig(),
+    poiConfig.seed,
+    scanDepositSymbols,
+  );
   const cart = createMineCart(tunnels);
   const colliders = createSurfaceColliderRegistry();
   const collision = createSurfaceCollision(heightField, tunnels, colliders);
@@ -165,7 +176,7 @@ export function buildSurfaceWorld(
   let marketOrigin: { x: number; z: number; baseY: number } | null = null;
   let shipyardOrigin: { x: number; z: number; baseY: number } | null = null;
 
-  if (poiConfig.hasMine && heightField.getPitConfig()) {
+  if (poiConfig.hasMine && heightField.getPitConfig() && !poiConfig.isGas) {
     const pitMeshes = buildMinePitMeshes(heightField.getPitConfig()!, heightField.getPitFloorY());
     root.add(pitMeshes);
     tunnels?.ensureBuilt();
@@ -197,7 +208,14 @@ export function buildSurfaceWorld(
         break;
       }
       case 'mine': {
-        const rimY = heightField.getHeight(x + PIT_RADIUS * 0.9, z);
+        if (poiConfig.isGas) {
+          const built = buildSiphonPlatformAt(x, z, baseY);
+          root.add(built.group);
+          built.colliders.forEach((c) => colliders.add(c, 'mine'));
+        }
+        const rimY = poiConfig.isGas
+          ? baseY + 6
+          : heightField.getHeight(x + PIT_RADIUS * 0.9, z);
         root.add(buildPoiBeacon(x, z, rimY, beaconColor));
         poiAnchors.push({
           kind: poi.kind,
@@ -251,6 +269,19 @@ export function buildSurfaceWorld(
         });
         break;
       }
+      case 'cave': {
+        const built = buildCaveStructuresAt(x, z, baseY);
+        root.add(built.group);
+        built.colliders.forEach((c) => colliders.add(c, 'cave'));
+        root.add(buildPoiBeacon(x, z, baseY, beaconColor));
+        poiAnchors.push({
+          kind: poi.kind,
+          label: poi.label,
+          position: beaconPositionForPoi(poi, baseY),
+          priority: poi.priority,
+        });
+        break;
+      }
       default: {
         const _exhaustive: never = poi.kind;
         return _exhaustive;
@@ -279,6 +310,7 @@ export function buildSurfaceWorld(
     colliders,
     zones,
     poiAnchors,
+    pois: poiConfig.pois,
     marketStalls,
     marketOrigin,
     shipyardOrigin,

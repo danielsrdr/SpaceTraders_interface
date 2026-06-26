@@ -1,7 +1,12 @@
 import { Vector3 } from 'three';
 import { PlanetView } from '../../../models/system.model';
 import { resolveWaypointType } from '../planet-helpers';
+import {
+  getParentMu,
+  minOrbitSemiMajorKm,
+} from './celestial-mass';
 import { getPlanetRadius3d, SystemLayout3d } from './system-scene.layout';
+import { API_KM_PER_UNIT, MIN_ORBIT_RADIUS_KM, VISUAL_TIME_SCALE } from './physics-units';
 
 /**
  * Analytic two-body Keplerian orbit element set. Position is a pure function of
@@ -13,6 +18,8 @@ interface OrbitBody {
   parent: string | null;
   /** Semi-major axis (world units). */
   a: number;
+  /** Semi-major axis (sim km) — used for Kepler mean motion. */
+  aKm: number;
   /** Eccentricity (0 = circle). */
   e: number;
   /** Inclination of the orbital plane (radians). */
@@ -23,25 +30,21 @@ interface OrbitBody {
   argPeri: number;
   /** Mean anomaly at epoch (radians), derived from the API-relative angle. */
   M0: number;
-  /** Mean motion (rad/s) — from Kepler's third law on the semi-major axis. */
+  /** Mean motion (rad/s) — Kepler's third law with visual time scaling. */
   n: number;
   /** Apoapsis distance a*(1+e), cached for extent math. */
   apo: number;
   tickOrder: number;
 }
 
-/** Inner-orbit reference: ~30s per revolution at this radius. */
-const BASE_OMEGA = (2 * Math.PI) / 30;
-const REF_RADIUS = 80;
-const MIN_RADIUS = 4;
-const MIN_OMEGA = 0.02;
-const MAX_OMEGA = 0.35;
-/** Clearance kept between a child body's surface and its parent's surface. */
+/** Clearance kept between a child body's surface and its parent's surface (render units). */
 const ORBIT_CLEARANCE = 3.5;
 /** Upper bound on seeded eccentricity so orbits stay visually sane. */
 const MAX_ECCENTRICITY = 0.22;
 /** Upper bound on seeded inclination (radians) so systems stay mostly planar. */
 const MAX_INCLINATION = 0.3;
+/** Minimum semi-major axis in render units for sun-orbiting bodies. */
+const MIN_RADIUS_RENDER = 4;
 
 function hashString(value: string): number {
   let hash = 0;
@@ -66,10 +69,11 @@ function solveKepler(M: number, e: number): number {
   return E;
 }
 
-function keplerMeanMotion(semiMajor: number, typeMultiplier = 1): number {
-  const r = Math.max(MIN_RADIUS, semiMajor);
-  const omega = BASE_OMEGA * Math.pow(REF_RADIUS / r, 1.5) * typeMultiplier;
-  return Math.min(MAX_OMEGA, Math.max(MIN_OMEGA, omega));
+/** Kepler mean motion n = sqrt(μ/a³) scaled for watchable animation. */
+function keplerMeanMotion(semiMajorKm: number, parentMu: number): number {
+  const a = Math.max(MIN_ORBIT_RADIUS_KM, semiMajorKm);
+  const nSim = Math.sqrt(parentMu / (a * a * a));
+  return nSim * VISUAL_TIME_SCALE;
 }
 
 function typeSpeedMultiplier(type: string): number {
@@ -133,18 +137,20 @@ export class SystemOrbitEngine {
 
     for (const planet of planets) {
       const parent = resolveParentSymbol(planet, bySymbol);
+      const parentBody = parent ? bySymbol.get(parent) ?? null : null;
       const parentPos = parentApiPosition(parent, bySymbol, layout);
       const dx = planet.position.x - parentPos.x;
       const dy = planet.position.y - parentPos.y;
       const apiDist = Math.hypot(dx, dy);
-      const minOrbit = this.minOrbitRadius(planet, parent, bySymbol);
-      const a = Math.max(minOrbit, apiDist * layout.scale);
+      const minOrbitKm = minOrbitSemiMajorKm(planet, parentBody);
+      const aKm = Math.max(minOrbitKm, apiDist * API_KM_PER_UNIT);
+      const minOrbitRender = this.minOrbitRadius(planet, parent, bySymbol);
+      const a = Math.max(minOrbitRender, apiDist * layout.scale);
       const M0 = apiDist > 0.001 ? Math.atan2(dy, dx) : hashString(planet.name) * 0.0001;
       const hash = hashString(planet.name);
+      const parentMu = getParentMu(planet, bySymbol);
 
-      // Clamp eccentricity so periapsis a*(1-e) never dips inside the parent
-      // clearance, regardless of the seeded value.
-      const maxE = Math.max(0, Math.min(MAX_ECCENTRICITY, 1 - minOrbit / a));
+      const maxE = Math.max(0, Math.min(MAX_ECCENTRICITY, 1 - minOrbitRender / a));
       const e = seededUnit(hash, 1) * maxE;
       const inc = (seededUnit(hash, 2) - 0.5) * 2 * MAX_INCLINATION;
       const raan = seededUnit(hash, 3) * Math.PI * 2;
@@ -154,12 +160,13 @@ export class SystemOrbitEngine {
         symbol: planet.name,
         parent,
         a,
+        aKm,
         e,
         inc,
         raan,
         argPeri,
         M0,
-        n: keplerMeanMotion(a, typeSpeedMultiplier(planet.type)),
+        n: keplerMeanMotion(aKm, parentMu) * typeSpeedMultiplier(planet.type),
         apo: a * (1 + e),
         tickOrder: 0,
       });
@@ -172,16 +179,16 @@ export class SystemOrbitEngine {
 
   /**
    * Smallest orbit radius that keeps a child body clear of its parent's surface.
-   * Falls back to MIN_RADIUS for top-level bodies orbiting the sun.
+   * Falls back to MIN_RADIUS_RENDER for top-level bodies orbiting the sun.
    */
   private minOrbitRadius(
     planet: PlanetView,
     parent: string | null,
     bySymbol: Map<string, PlanetView>,
   ): number {
-    if (!parent) return MIN_RADIUS;
+    if (!parent) return MIN_RADIUS_RENDER;
     const parentBody = bySymbol.get(parent);
-    if (!parentBody) return MIN_RADIUS;
+    if (!parentBody) return MIN_RADIUS_RENDER;
     const parentRadius = getPlanetRadius3d(parentBody);
     const childRadius = getPlanetRadius3d(planet);
     return parentRadius + childRadius + ORBIT_CLEARANCE;
@@ -215,10 +222,6 @@ export class SystemOrbitEngine {
     this.tickOrder = ordered;
   }
 
-  /**
-   * Cumulative apoapsis reach down each parent chain. Orbital elements are
-   * static, so the worst-case extent is fixed and can be cached at build time.
-   */
   private computeMaxExtent(planets: PlanetView[]): void {
     const reach = new Map<string, number>();
     let extent = 120;
@@ -245,51 +248,39 @@ export class SystemOrbitEngine {
     this.recomputePositions();
   }
 
-  /**
-   * Jump the simulation to an absolute time (seconds since build) and recompute
-   * positions. Motion is a pure function of time, so this enables exact,
-   * reversible scrubbing for the black-box replay.
-   */
   seekTo(absoluteSeconds: number): void {
     this.simTime = absoluteSeconds;
     if (this.bodies.size) this.recomputePositions();
   }
 
-  /** Current absolute simulation time (seconds since build). */
   get currentTime(): number {
     return this.simTime;
   }
 
-  /** Position of a body relative to its parent (focus at origin) at a given mean anomaly. */
   private orbitalPoint(body: OrbitBody, meanAnomaly: number, target: Vector3): Vector3 {
     const E = solveKepler(meanAnomaly, body.e);
     const cosE = Math.cos(E);
     const sinE = Math.sin(E);
 
-    // Perifocal coordinates (periapsis along +x of the orbital plane).
     const px = body.a * (cosE - body.e);
     const py = body.a * Math.sqrt(1 - body.e * body.e) * sinE;
 
-    // Rotate by argument of periapsis within the orbital plane.
     const cosW = Math.cos(body.argPeri);
     const sinW = Math.sin(body.argPeri);
     const x1 = px * cosW - py * sinW;
     const y1 = px * sinW + py * cosW;
 
-    // Tilt by inclination about the line of nodes (x-axis).
     const cosI = Math.cos(body.inc);
     const sinI = Math.sin(body.inc);
     const x2 = x1;
     const y2 = y1 * cosI;
     const z2 = y1 * sinI;
 
-    // Rotate by the longitude of the ascending node about the vertical axis.
     const cosO = Math.cos(body.raan);
     const sinO = Math.sin(body.raan);
     const planarX = x2 * cosO - y2 * sinO;
     const planarY = x2 * sinO + y2 * cosO;
 
-    // Map math frame -> scene frame: horizontal plane is scene X/Z, Y is up.
     return target.set(planarX, z2, planarY);
   }
 
@@ -329,10 +320,6 @@ export class SystemOrbitEngine {
     return this.positions;
   }
 
-  /**
-   * Full ellipse sampled in parent-relative scene coordinates, for drawing the
-   * body's ephemeris trail. Re-center on the parent's current world position.
-   */
   getOrbitPath(symbol: string, segments = 128): Vector3[] {
     const body = this.bodies.get(symbol);
     if (!body) return [];
@@ -344,13 +331,16 @@ export class SystemOrbitEngine {
     return path;
   }
 
-  /** Symbol of a body's orbital parent (null for sun-orbiting bodies). */
   getParentSymbol(symbol: string): string | null {
     return this.bodies.get(symbol)?.parent ?? null;
   }
 
-  /** Scene extent including body radii — used for camera far plane and god view. */
   sceneExtent(_planets?: PlanetView[]): number {
     return this.maxExtent;
   }
+}
+
+/** Exported for unit tests — verify n ∝ a^(-3/2). */
+export function keplerMeanMotionForTest(semiMajorKm: number, parentMu: number): number {
+  return keplerMeanMotion(semiMajorKm, parentMu);
 }

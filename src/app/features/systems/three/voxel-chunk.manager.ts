@@ -14,6 +14,7 @@ import {
 } from '../planet-helpers';
 import { buildMarketStructuresAt, buildMineStructuresAt } from './zone-buildings.builder';
 import { buildProceduralSurfaceZones, SurfaceZone } from './surface-zones';
+import type { PoiPositions } from './surface-poi';
 
 export type BlockKind = 'grass' | 'dirt' | 'stone' | 'wood' | 'sand' | 'bedrock';
 
@@ -45,14 +46,6 @@ function chunkKey(cx: number, cz: number): string {
 }
 
 type Biome = 'jungle' | 'industrial' | 'desert' | 'rocky' | 'sand';
-
-export interface PoiPositions {
-  market: { x: number; z: number } | null;
-  mine: { x: number; z: number } | null;
-  shipyard: { x: number; z: number } | null;
-  ruins: { x: number; z: number } | null;
-  depot: { x: number; z: number } | null;
-}
 
 export class VoxelChunkManager {
   readonly root = new Group();
@@ -95,6 +88,7 @@ export class VoxelChunkManager {
       shipyard: null,
       ruins: null,
       depot: null,
+      cave: null,
     };
 
     this.zones = buildProceduralSurfaceZones(this.hasMarket, this.hasMine, this.poi);

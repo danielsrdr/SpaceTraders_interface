@@ -1,7 +1,8 @@
 import { Vector3 } from 'three';
 import { PlanetView } from '../../../models/system.model';
 import { computeSystemLayout3d } from './system-scene.layout';
-import { SystemOrbitEngine } from './system-orbit.engine';
+import { SystemOrbitEngine, keplerMeanMotionForTest } from './system-orbit.engine';
+import { STAR_MU } from './celestial-mass';
 
 function makePlanet(
   name: string,
@@ -92,5 +93,13 @@ describe('SystemOrbitEngine', () => {
     const engine = buildEngine([makePlanet('A', 10, 0)]);
     const pos = engine.getWorldPosition('does-not-exist', new Vector3());
     expect(pos.equals(new Vector3(0, 0, 0))).toBe(true);
+  });
+
+  it('obeys Kepler third law: n ∝ a^(-3/2) for a fixed parent μ', () => {
+    const nNear = keplerMeanMotionForTest(10_000, STAR_MU);
+    const nFar = keplerMeanMotionForTest(40_000, STAR_MU);
+    const ratio = nNear / nFar;
+    const expected = Math.pow(40_000 / 10_000, 1.5);
+    expect(ratio).toBeCloseTo(expected, 4);
   });
 });
