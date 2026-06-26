@@ -6,7 +6,8 @@ import {
   minOrbitSemiMajorKm,
 } from './celestial-mass';
 import { getPlanetRadius3d, SystemLayout3d } from './system-scene.layout';
-import { API_KM_PER_UNIT, MIN_ORBIT_RADIUS_KM, VISUAL_TIME_SCALE } from './physics-units';
+import { API_KM_PER_UNIT } from './physics-units';
+import { displayMeanMotion } from './orbit-visual-scale';
 
 /**
  * Analytic two-body Keplerian orbit element set. Position is a pure function of
@@ -69,11 +70,9 @@ function solveKepler(M: number, e: number): number {
   return E;
 }
 
-/** Kepler mean motion n = sqrt(μ/a³) scaled for watchable animation. */
+/** Kepler mean motion n = sqrt(μ/a³) with tiered visual calibration. */
 function keplerMeanMotion(semiMajorKm: number, parentMu: number): number {
-  const a = Math.max(MIN_ORBIT_RADIUS_KM, semiMajorKm);
-  const nSim = Math.sqrt(parentMu / (a * a * a));
-  return nSim * VISUAL_TIME_SCALE;
+  return displayMeanMotion(semiMajorKm, parentMu);
 }
 
 function typeSpeedMultiplier(type: string): number {

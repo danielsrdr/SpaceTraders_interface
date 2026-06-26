@@ -25,9 +25,31 @@ export const G_SIM = 6.674e-2;
 
 /**
  * Scales real Kepler mean motion into watchable animation speeds.
- * Real n (rad/s sim) × this factor → displayed angular velocity.
+ * Prefer {@link orbitVisualTimeScale} — this flat factor is kept for legacy callers only.
+ * @deprecated Use orbitVisualTimeScale(parentMu) for tiered heliocentric / planetary calibration.
  */
 export const VISUAL_TIME_SCALE = 8_000;
+
+/** Reference heliocentric orbit (km) calibrated to REF_HELIO_PERIOD_SEC. */
+export const REF_HELIO_ORBIT_KM = 120_000;
+
+/** Target revolution period at REF_HELIO_ORBIT_KM — slow but visibly orbiting the star. */
+export const REF_HELIO_PERIOD_SEC = 150;
+
+/** Reference orbit around a gas giant (km) and its target period (s). */
+export const REF_GIANT_ORBIT_KM = 80_000;
+export const REF_GIANT_PERIOD_SEC = 40;
+
+/** Reference orbit around a rocky planet (km) and its target period (s). */
+export const REF_PLANET_ORBIT_KM = 8_000;
+export const REF_PLANET_PERIOD_SEC = 28;
+
+/** Clamp displayed angular velocity (rad/s) — floor keeps outer sun-orbiters visibly drifting. */
+export const MIN_ORBIT_OMEGA = 0.008;
+export const MAX_ORBIT_OMEGA = 0.35;
+
+/** Normalized μ threshold: parent at or above this is treated as the system star. */
+export const STAR_MU_THRESHOLD = 0.5;
 
 /** Minimum on-screen ship size in pixels (Kerbal / Elite style visibility floor). */
 export const MIN_SCREEN_SHIP_PX = 8;

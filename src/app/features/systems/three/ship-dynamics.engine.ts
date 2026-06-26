@@ -6,8 +6,8 @@ import { circularOrbitSpeedKmS } from './gravity-field';
 import {
   ORBIT_ALTITUDE_KM,
   USE_PHYSICS_DYNAMICS,
-  VISUAL_TIME_SCALE,
 } from './physics-units';
+import { orbitVisualTimeScale } from './orbit-visual-scale';
 import { renderRadius, shipOrbitRenderDistance, shipOrbitVerticalOffset } from './render-transform';
 import { orientAlongArc, sampleTransitArc } from './transit-arc.math';
 
@@ -232,7 +232,7 @@ export class ShipDynamicsEngine {
     const orbitRenderR = shipOrbitRenderDistance(renderRadius(simRadiusKm, 'local'), simRadiusKm);
     const orbitKm = simRadiusKm + ORBIT_ALTITUDE_KM;
     const omega =
-      (circularOrbitSpeedKmS(parentMu, orbitKm) / orbitKm) * VISUAL_TIME_SCALE;
+      (circularOrbitSpeedKmS(parentMu, orbitKm) / orbitKm) * orbitVisualTimeScale(parentMu);
     const phase =
       (orbitTotal > 1 ? (orbitIndex / orbitTotal) * Math.PI * 2 : 0) + omega * simTime;
     const x = Math.cos(phase) * orbitRenderR;
