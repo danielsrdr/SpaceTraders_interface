@@ -4,7 +4,8 @@ import {
   isGasGiantWaypoint,
   resolveWaypointType,
 } from '../planet-helpers';
-import { hashString } from './terrain/terrain-noise';
+import { planetSeedInt } from './planet-seed';
+import { buildSurfaceTraitProfile, type SurfaceTraitProfile } from './surface-trait-profile';
 
 export interface PoiPositions {
   market: { x: number; z: number } | null;
@@ -18,10 +19,11 @@ export interface SurfacePoiConfig {
   isGas: boolean;
   isAsteroid: boolean;
   poi: PoiPositions;
+  profile: SurfaceTraitProfile;
 }
 
 export function buildSurfacePoiConfig(planet: PlanetView): SurfacePoiConfig {
-  const seed = hashString(planet.name);
+  const seed = planetSeedInt(planet.name);
   const isAsteroid = isAsteroidWaypoint(planet);
   const isGas = isGasGiantWaypoint(planet);
   const hasMarket = hasTrait(planet, 'MARKETPLACE');
@@ -40,5 +42,13 @@ export function buildSurfacePoiConfig(planet: PlanetView): SurfacePoiConfig {
       : null,
   };
 
-  return { seed, hasMarket, hasMine, isGas, isAsteroid, poi };
+  return {
+    seed,
+    hasMarket,
+    hasMine,
+    isGas,
+    isAsteroid,
+    poi,
+    profile: buildSurfaceTraitProfile(planet),
+  };
 }

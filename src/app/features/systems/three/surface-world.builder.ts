@@ -11,6 +11,7 @@ import {
 import { MarketData, PlanetView } from '../../../models/system.model';
 import { buildMinePitMeshes, PIT_RADIUS } from './mine/mine-pit.builder';
 import { createMineTunnelManager, MineTunnelManager } from './mine/mine-tunnel.manager';
+import { createMineCart, MineCart } from './mine/mine-cart';
 import { buildSurfaceProps } from './surface-props.builder';
 import { buildSurfacePoiConfig } from './surface-poi';
 import { buildProceduralSurfaceZones, SurfaceZone } from './surface-zones';
@@ -21,7 +22,9 @@ import {
 } from './surface-collider-registry';
 import { buildMarketStructuresAt, MarketStallAnchor } from './zone-buildings.builder';
 import { createTerrainHeightField, TerrainHeightField } from './terrain/terrain-height';
+import { applyTerrainProfile } from './terrain/terrain-material';
 import { createTerrainChunkManager, TerrainChunkManager } from './terrain/terrain-chunk.manager';
+import type { SurfaceTraitProfile } from './surface-trait-profile';
 import type { SurfaceZoneKind } from './system-view-mode';
 
 export interface SurfacePoiAnchor {
@@ -40,6 +43,7 @@ export interface SurfaceWorldResult {
   heightField: TerrainHeightField;
   terrainManager: TerrainChunkManager;
   tunnels: MineTunnelManager | null;
+  cart: MineCart | null;
   collision: SurfaceCollision;
   colliders: SurfaceColliderRegistry;
   zones: SurfaceZone[];
@@ -47,6 +51,7 @@ export interface SurfaceWorldResult {
   marketStalls: MarketStallAnchor[];
   marketOrigin: { x: number; z: number; baseY: number } | null;
   spawn: { x: number; y: number; z: number };
+  profile: SurfaceTraitProfile;
 }
 
 function buildPoiBeacon(x: number, z: number, baseY: number, color: number): Group {
@@ -94,10 +99,12 @@ export function buildSurfaceWorld(
   const heightField = createTerrainHeightField(poiConfig);
   const terrainManager = createTerrainChunkManager(heightField, poiConfig);
   const tunnels = createMineTunnelManager(heightField.getPitConfig(), poiConfig.seed);
+  const cart = createMineCart(tunnels);
   const colliders = createSurfaceColliderRegistry();
   const collision = createSurfaceCollision(heightField, tunnels, colliders);
   const spawn = heightField.getSpawn();
   const zones = buildProceduralSurfaceZones(poiConfig.hasMarket, poiConfig.hasMine, poiConfig.poi);
+  applyTerrainProfile(terrainManager.material, poiConfig.profile);
 
   const root = new Group();
   root.name = 'surface-world';
@@ -112,6 +119,7 @@ export function buildSurfaceWorld(
     root.add(pitMeshes);
     tunnels?.ensureBuilt();
     if (tunnels) root.add(tunnels.root);
+    if (cart) root.add(cart.root);
   }
 
   if (poiConfig.hasMarket && poiConfig.poi.market) {
@@ -137,7 +145,10 @@ export function buildSurfaceWorld(
     });
   }
 
-  const props = buildSurfaceProps(heightField, poiConfig.seed);
+  const props = buildSurfaceProps(heightField, poiConfig.seed, {
+    spawn: { x: spawn.x, z: spawn.z },
+    profile: poiConfig.profile,
+  });
   root.add(props.group);
   props.colliders.forEach((c) => colliders.add(c, 'static'));
 
@@ -148,6 +159,7 @@ export function buildSurfaceWorld(
     heightField,
     terrainManager,
     tunnels,
+    cart,
     collision,
     colliders,
     zones,
@@ -155,6 +167,7 @@ export function buildSurfaceWorld(
     marketStalls,
     marketOrigin,
     spawn,
+    profile: poiConfig.profile,
   };
 }
 

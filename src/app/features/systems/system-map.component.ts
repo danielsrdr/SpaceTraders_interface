@@ -68,6 +68,7 @@ import { PageBackgroundService } from '../../shared/services/page-background.ser
 
 import { SnackbarService } from '../../shared/services/snackbar.service';
 import { RadioService } from '../../shared/services/radio.service';
+import { SurfaceWeatherService } from '../../shared/services/surface-weather.service';
 
 import {
 
@@ -223,6 +224,8 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
   private readonly snackbar = inject(SnackbarService);
 
   private readonly radio = inject(RadioService);
+
+  private readonly surfaceWeather = inject(SurfaceWeatherService);
 
   private readonly dialog = inject(DialogService);
 
@@ -996,25 +999,17 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
     }
 
-    const orbitShips = this.ships().filter(
+    const ship = await this.resolveOrbitShipForExtraction(planet);
 
-      (s) => shipAtWaypoint(s, planet.name) && shipInOrbit(s),
+    if (!ship) {
 
-    );
-
-    if (!orbitShips.length) {
-
-      this.snackbar.show('Select a ship in orbit at this waypoint to mine', 'error');
+      this.snackbar.show('No ship at this waypoint to mine', 'error');
 
       this.detailPanel.set('info');
 
       return;
 
     }
-
-    const ship = orbitShips[0];
-
-    this.fleetStore.selectShip(ship);
 
     if (isGasGiantWaypoint(planet)) {
 
@@ -1026,9 +1021,31 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
     } else {
 
-      await this.scanSurface(ship.symbol);
+      this.snackbar.show('Aim at ore in the tunnels and press E to extract', 'info');
 
     }
+
+  }
+
+
+
+  async onSurfaceOreBroken(event: { blockKey: string }): Promise<void> {
+
+    const planet = this.selectedPlanet();
+
+    if (!planet) return;
+
+    const ship = await this.resolveOrbitShipForExtraction(planet);
+
+    if (!ship) {
+
+      this.snackbar.show('No ship at this waypoint to extract', 'error');
+
+      return;
+
+    }
+
+    await this.extractResources(ship.symbol);
 
   }
 
@@ -1249,6 +1266,68 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
       (s) => s.nav.systemSymbol === planet.system && s.nav.waypointSymbol === planet.name,
 
     );
+
+  }
+
+
+
+  /** Pick a ship at the waypoint for extraction, auto-orbiting if docked (surface entry docks first). */
+
+  private async resolveOrbitShipForExtraction(planet: PlanetView): Promise<ShipData | null> {
+
+    const atWaypoint = this.shipsForWaypoint(planet);
+
+    const selected = this.selectedShip();
+
+    const preferred =
+
+      (selected && shipAtWaypoint(selected, planet.name) ? selected : null) ??
+
+      atWaypoint.find((s) => shipInOrbit(s)) ??
+
+      atWaypoint.find((s) => shipDocked(s)) ??
+
+      atWaypoint[0] ??
+
+      null;
+
+    if (!preferred) return null;
+
+    if (shipInOrbit(preferred)) {
+
+      this.fleetStore.selectShip(preferred);
+
+      return preferred;
+
+    }
+
+    if (!shipDocked(preferred)) return null;
+
+    try {
+
+      await this.api.orbitShip(preferred.symbol, planet.name);
+
+      await this.loadShips();
+
+      this.fleetStore.syncSelectedFromList();
+
+      const updated = this.ships().find((s) => s.symbol === preferred.symbol);
+
+      if (updated && shipInOrbit(updated)) {
+
+        this.fleetStore.selectShip(updated);
+
+        return updated;
+
+      }
+
+    } catch (error) {
+
+      this.snackbar.show(error instanceof Error ? error.message : 'Auto-orbit failed', 'error');
+
+    }
+
+    return null;
 
   }
 
@@ -1891,6 +1970,12 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
 
   async scanSurface(shipSymbol: string): Promise<void> {
+
+    if (this.viewMode() === 'surface' && this.surfaceWeather.sensorQuality < 0.85) {
+
+      this.snackbar.show('Surface weather degrading scan accuracy', 'error');
+
+    }
 
     this.loadingAction.set(`scan-surface-${shipSymbol}`);
 

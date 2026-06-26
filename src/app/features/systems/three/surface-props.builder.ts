@@ -16,9 +16,15 @@ import {
 import { noise2d } from './terrain/terrain-noise';
 import { TerrainHeightField } from './terrain/terrain-height';
 import type { SurfaceCollider } from './surface-collider-registry';
+import type { SurfaceTraitProfile } from './surface-trait-profile';
 
 /** Props near the spawn point are left collider-free so the player never starts stuck. */
 const SPAWN_CLEAR_RADIUS = 3;
+
+export interface SurfacePropsOptions {
+  spawn: { x: number; z: number };
+  profile: SurfaceTraitProfile;
+}
 
 export interface SurfacePropsResult {
   group: Group;
@@ -71,7 +77,15 @@ export function buildSkydome(): Mesh {
   return mesh;
 }
 
-export function buildSurfaceProps(heightField: TerrainHeightField, seed: number): SurfacePropsResult {
+export function buildSurfaceProps(
+  heightField: TerrainHeightField,
+  seed: number,
+  options: SurfacePropsOptions,
+): SurfacePropsResult {
+  const { spawn, profile } = options;
+  const propDensity = profile.propDensity;
+  const treeThreshold = Math.max(0.55, 0.72 - propDensity * 0.08);
+  const rockThreshold = Math.max(0.5, 0.65 - propDensity * 0.06);
   const group = new Group();
   group.name = 'surface-props';
   const colliders: SurfaceCollider[] = [];
@@ -95,10 +109,10 @@ export function buildSurfaceProps(heightField: TerrainHeightField, seed: number)
       const h = heightField.getHeight(x, z);
       const slope = heightField.getSlope(x, z);
 
-      if ((biome === 'desert' || biome === 'jungle') && n > 0.72) {
+      if ((biome === 'desert' || biome === 'jungle') && n > treeThreshold) {
         palms.push([x, h, z]);
       }
-      if ((biome === 'rocky' || biome === 'industrial') && slope > 0.45 && n > 0.65) {
+      if ((biome === 'rocky' || biome === 'industrial') && slope > 0.45 && n > rockThreshold) {
         rocks.push([x, h, z, 0.6 + n * 0.8]);
       }
     }
@@ -118,7 +132,7 @@ export function buildSurfaceProps(heightField: TerrainHeightField, seed: number)
 
       const cx = x + 0.5;
       const cz = z + 0.5;
-      if (Math.hypot(cx, cz) > SPAWN_CLEAR_RADIUS) {
+      if (Math.hypot(cx - spawn.x, cz - spawn.z) > SPAWN_CLEAR_RADIUS) {
         // Trunk only (canopy excluded so the player does not snag on leaves).
         colliders.push({ kind: 'cylinder', x: cx, z: cz, radius: 0.3, baseY: h, topY: h + 3 });
       }
@@ -144,7 +158,7 @@ export function buildSurfaceProps(heightField: TerrainHeightField, seed: number)
 
       const cx = x + 0.5;
       const cz = z + 0.5;
-      if (Math.hypot(cx, cz) > SPAWN_CLEAR_RADIUS) {
+      if (Math.hypot(cx - spawn.x, cz - spawn.z) > SPAWN_CLEAR_RADIUS) {
         const half = s * 0.5;
         colliders.push({
           kind: 'box',

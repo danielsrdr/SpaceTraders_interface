@@ -1,5 +1,5 @@
 import { fbm2d, noise2d } from './terrain-noise';
-import { PIT_FLOOR_Y, sampleMarketPadHeight, samplePitHeight, type MinePitConfig } from '../mine/mine-pit.builder';
+import { PIT_FLOOR_Y, PIT_RADIUS, sampleMarketPadHeight, samplePitHeight, type MinePitConfig } from '../mine/mine-pit.builder';
 import type { SurfacePoiConfig } from '../surface-poi';
 
 export type BiomeKind = 'jungle' | 'industrial' | 'desert' | 'rocky' | 'sand';
@@ -28,11 +28,27 @@ export class TerrainHeightField {
   getBiome(x: number, z: number): BiomeKind {
     if (this.config.isGas) return 'sand';
     if (this.config.isAsteroid) return 'rocky';
+
     const n = noise2d(this.config.seed + 5, x * 0.03, z * 0.03);
-    if (n > 0.65) return 'jungle';
-    if (n > 0.45) return 'industrial';
-    if (n > 0.25) return 'desert';
-    return 'rocky';
+    const bias = this.config.profile.biomeBias;
+
+    const scores: Record<BiomeKind, number> = {
+      jungle: (n > 0.65 ? n : 0) + (bias.jungle ?? 0),
+      industrial: (n > 0.45 && n <= 0.65 ? n : 0) + (bias.industrial ?? 0),
+      desert: (n > 0.25 && n <= 0.45 ? n : 0) + (bias.desert ?? 0),
+      rocky: (n <= 0.25 ? 1 - n : 0) + (bias.rocky ?? 0),
+      sand: bias.sand ?? 0,
+    };
+
+    let best: BiomeKind = 'rocky';
+    let bestScore = -Infinity;
+    for (const kind of ['jungle', 'industrial', 'desert', 'rocky', 'sand'] as BiomeKind[]) {
+      if (scores[kind] > bestScore) {
+        bestScore = scores[kind];
+        best = kind;
+      }
+    }
+    return best;
   }
 
   getBiomeWeights(x: number, z: number): BiomeWeights {
@@ -128,6 +144,26 @@ export class TerrainHeightField {
   }
 
   getSpawn(): { x: number; y: number; z: number } {
+    const { seed, poi, hasMine, hasMarket } = this.config;
+
+    if (hasMine && this.pitConfig) {
+      const angle = ((seed % 360) * Math.PI) / 180;
+      const rimDist = PIT_RADIUS * 0.92;
+      const x = this.pitConfig.centerX + Math.cos(angle) * rimDist;
+      const z = this.pitConfig.centerZ + Math.sin(angle) * rimDist;
+      const y = this.getHeight(x, z) + 2;
+      return { x, y, z };
+    }
+
+    if (hasMarket && poi.market) {
+      const { x: mx, z: mz } = poi.market;
+      const angle = (((seed >> 4) % 360) * Math.PI) / 180;
+      const x = mx + Math.cos(angle) * 12;
+      const z = mz + Math.sin(angle) * 12;
+      const y = this.getHeight(x, z) + 2;
+      return { x, y, z };
+    }
+
     const y = this.getHeight(0, 0) + 2;
     return { x: 0, y, z: 0 };
   }

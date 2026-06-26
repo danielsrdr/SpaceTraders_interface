@@ -20,7 +20,8 @@ import { PlanetView } from '../../../models/system.model';
 import { resolveWaypointType } from '../planet-helpers';
 import { createLitPlanetMaterial, planetTypeCode } from './celestial-planet.shader';
 import { SurfaceBaker } from './celestial-surface.baker';
-import { seedFromName } from './shader-noise.glsl';
+import { planetSeedUnit } from './planet-seed';
+import { buildSurfaceTraitProfile } from './surface-trait-profile';
 import { getPlanetRadius3d, SystemLayout3d } from './system-scene.layout';
 
 const TYPE_PALETTE: Record<string, { color: number; emissive: number; glow: number }> = {
@@ -219,7 +220,9 @@ function buildSphereBody(
   baker?: SurfaceBaker,
 ): WebGLRenderTarget | undefined {
   const tinted = tintedColor(palette.color, planet.name);
-  const seed = seedFromName(planet.name);
+  const profile = buildSurfaceTraitProfile(planet);
+  tinted.lerp(new Color(profile.fogColor), 0.25);
+  const seed = planetSeedUnit(planet.name);
   const typeCode = planetTypeCode(planetType);
 
   // Static rocky/ocean (0) and moon/asteroid (2) surfaces are baked once so the

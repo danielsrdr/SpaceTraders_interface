@@ -10,6 +10,16 @@
     </div>
 
     @if (!entryRunning()) {
+      @if (weatherEvent(); as evt) {
+        <p class="rounded bg-slate-950/80 px-3 py-2 text-xs text-amber-200/90 ring-1 ring-amber-500/30">
+          Surface weather: {{ evt }}
+        </p>
+      }
+      @if (mineProgressPct() !== null) {
+        <p class="rounded bg-cyan-950/80 px-3 py-2 text-xs text-cyan-200/90 ring-1 ring-cyan-500/30">
+          Network excavated: {{ mineProgressPct() }}%
+        </p>
+      }
       @if (marketPending()) {
         <p class="rounded bg-emerald-950/80 px-4 py-3 text-sm text-emerald-200 ring-1 ring-emerald-500/40">
           Market opening…
@@ -30,8 +40,19 @@
     }
 
     <div class="flex flex-col items-center gap-2">
+      @if (!entryRunning() && pointerLocked() && !launchActive()) {
+        <div class="flex w-32 flex-col items-center gap-1">
+          <span class="text-[10px] tracking-wider text-slate-500 uppercase">Jetpack</span>
+          <div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-800/80 ring-1 ring-slate-600/40">
+            <div
+              class="h-full rounded-full bg-cyan-400/90 transition-[width] duration-75"
+              [style.width.%]="jetpackFuel() * 100"
+            ></div>
+          </div>
+        </div>
+      }
       <p class="text-center text-[11px] text-slate-400/90">
-        WASD: Move · Space: Jump · E: Interact · Esc: Leave planet
+        WASD: Move · Space: Jump / Jetpack (hold in air) · E: Interact / Mine · Esc: Leave planet
       </p>
       <button type="button" class="pointer-events-auto sk-btn" (click)="exit()">Leave planet</button>
     </div>

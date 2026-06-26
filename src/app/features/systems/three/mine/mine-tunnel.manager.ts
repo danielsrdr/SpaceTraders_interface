@@ -4,15 +4,37 @@ import {
   Group,
   InstancedMesh,
   Matrix4,
+  Mesh,
   MeshStandardMaterial,
   PointLight,
+  Vector3,
 } from 'three';
 import { noise2d } from '../terrain/terrain-noise';
 import { PIT_FLOOR_Y, type MinePitConfig } from './mine-pit.builder';
 
 export type TunnelBlockKind = 'stone' | 'ore' | 'rail' | 'torch';
 
+export interface OreNode {
+  key: string;
+  instanceIndex: number;
+  broken: boolean;
+}
+
+export interface BlockPick {
+  x: number;
+  y: number;
+  z: number;
+  key: string;
+  isOre: boolean;
+}
+
+export interface BreakBlockResult {
+  key: string;
+  wasOre: boolean;
+}
+
 const BLOCK_SIZE = 1;
+const HIDDEN_SCALE = 0.001;
 
 function blockKey(x: number, y: number, z: number): string {
   return `${x},${y},${z}`;
@@ -27,14 +49,21 @@ export class MineTunnelManager {
   readonly root = new Group();
   private readonly solids = new Set<string>();
   private readonly air = new Set<string>();
+  private readonly oreNodes = new Map<string, OreNode>();
   private readonly sharedGeometry = new BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
   private readonly materials: Record<TunnelBlockKind, MeshStandardMaterial>;
+  private readonly hideMatrix = new Matrix4();
+  private oreMesh: InstancedMesh | null = null;
   private built = false;
+  private brokenCount = 0;
+  private totalOres = 0;
+  private nightVeinBoost = false;
 
   constructor(
-    private readonly pitConfig: MinePitConfig,
+    readonly pitConfig: MinePitConfig,
     private readonly seed: number,
   ) {
+    this.hideMatrix.makeScale(HIDDEN_SCALE, HIDDEN_SCALE, HIDDEN_SCALE);
     this.materials = {
       stone: new MeshStandardMaterial({ color: 0x57534e, flatShading: true }),
       ore: new MeshStandardMaterial({
@@ -67,13 +96,101 @@ export class MineTunnelManager {
     return this.solids.has(blockKey(fx, fy, fz));
   }
 
+  getOreNodes(): readonly OreNode[] {
+    return [...this.oreNodes.values()];
+  }
+
+  getTotalOres(): number {
+    return this.totalOres;
+  }
+
+  getNetworkProgress(): number {
+    if (this.totalOres <= 0) return 0;
+    return this.brokenCount / this.totalOres;
+  }
+
+  getRailBounds(): { centerX: number; floorY: number; zStart: number; zEnd: number } {
+    const { centerX, centerZ } = this.pitConfig;
+    return {
+      centerX,
+      floorY: PIT_FLOOR_Y - 5,
+      zStart: centerZ,
+      zEnd: centerZ + 16,
+    };
+  }
+
+  setNightVeinBoost(active: boolean): void {
+    this.nightVeinBoost = active;
+    this.materials.ore.emissiveIntensity = active ? 0.85 : 0.35;
+  }
+
+  applyBrokenKeys(keys: readonly string[]): void {
+    this.ensureBuilt();
+    for (const key of keys) {
+      if (!this.solids.has(key)) continue;
+      const node = this.oreNodes.get(key);
+      if (!node || node.broken) continue;
+      this.breakBlockInternal(key, node, false);
+    }
+    this.brokenCount = keys.filter((k) => this.oreNodes.get(k)?.broken).length;
+  }
+
+  pickBlock(origin: Vector3, direction: Vector3, maxDist = 4): BlockPick | null {
+    this.ensureBuilt();
+    const dir = direction.clone().normalize();
+    const step = 0.2;
+    for (let t = 0.4; t <= maxDist; t += step) {
+      const px = origin.x + dir.x * t;
+      const py = origin.y + dir.y * t;
+      const pz = origin.z + dir.z * t;
+      const fx = Math.floor(px);
+      const fy = Math.floor(py);
+      const fz = Math.floor(pz);
+      const key = blockKey(fx, fy, fz);
+      if (!this.solids.has(key)) continue;
+      const node = this.oreNodes.get(key);
+      if (node?.broken) continue;
+      return { x: fx, y: fy, z: fz, key, isOre: !!node };
+    }
+    return null;
+  }
+
+  breakBlock(x: number, y: number, z: number): BreakBlockResult | null {
+    this.ensureBuilt();
+    const key = blockKey(Math.floor(x), Math.floor(y), Math.floor(z));
+    if (!this.solids.has(key)) return null;
+
+    const node = this.oreNodes.get(key);
+    if (node?.broken) return null;
+
+    const wasOre = !!node;
+    this.breakBlockInternal(key, node ?? null, true);
+    return { key, wasOre };
+  }
+
   dispose(): void {
     this.root.clear();
     this.solids.clear();
     this.air.clear();
+    this.oreNodes.clear();
+    this.oreMesh = null;
     this.sharedGeometry.dispose();
     for (const mat of Object.values(this.materials)) {
       mat.dispose();
+    }
+  }
+
+  private breakBlockInternal(key: string, node: OreNode | null, countProgress: boolean): void {
+    this.solids.delete(key);
+    if (node && !node.broken) {
+      node.broken = true;
+      if (this.oreMesh) {
+        this.oreMesh.setMatrixAt(node.instanceIndex, this.hideMatrix);
+        this.oreMesh.instanceMatrix.needsUpdate = true;
+      }
+      if (countProgress) {
+        this.brokenCount++;
+      }
     }
   }
 
@@ -95,13 +212,8 @@ export class MineTunnelManager {
     const { centerX, centerZ } = this.pitConfig;
     const floorY = PIT_FLOOR_Y;
 
-    // Entry shaft
     this.carveBox(centerX - 1, floorY, centerZ - 1, 3, 5, 3);
-
-    // Main tunnel heading south
     this.carveBox(centerX - 1, floorY - 5, centerZ - 1, 3, 3, 18);
-
-    // Side branches
     this.carveBox(centerX - 9, floorY - 8, centerZ + 4, 8, 3, 3);
     this.carveBox(centerX + 2, floorY - 10, centerZ + 8, 3, 3, 8);
     this.carveBox(centerX - 6, floorY - 12, centerZ + 12, 6, 3, 3);
@@ -143,14 +255,12 @@ export class MineTunnelManager {
       this.solids.add(key);
     }
 
-    // Rails along main tunnel floor
     for (let z = centerZ; z <= centerZ + 16; z++) {
       if ((z - centerZ) % 2 === 0) {
         blockPositions.rail.push([centerX, floorY - 5, z]);
       }
     }
 
-    // Torches
     const torchSpots: Array<[number, number, number]> = [
       [centerX - 2, floorY - 4, centerZ + 2],
       [centerX + 2, floorY - 6, centerZ + 6],
@@ -174,12 +284,21 @@ export class MineTunnelManager {
         const [bx, by, bz] = positions[i]!;
         matrix.makeTranslation(bx + 0.5, by + 0.5, bz + 0.5);
         mesh.setMatrixAt(i, matrix);
+        if (kind === 'ore') {
+          const key = blockKey(bx, by, bz);
+          this.oreNodes.set(key, { key, instanceIndex: i, broken: false });
+        }
       }
       mesh.instanceMatrix.needsUpdate = true;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.root.add(mesh);
+      if (kind === 'ore') {
+        this.oreMesh = mesh;
+      }
     }
+
+    this.totalOres = this.oreNodes.size;
   }
 }
 

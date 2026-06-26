@@ -16,6 +16,13 @@ export interface FpsCollisionMode {
   useTerrainHeight: boolean;
 }
 
+const JETPACK_FUEL_MAX = 1;
+const JETPACK_THRUST = 38;
+const JETPACK_DRAIN_PER_SEC = 0.35;
+const JETPACK_RECHARGE_PER_SEC = 0.5;
+const AIRBORNE_CLEARANCE = 0.45;
+const MAX_JETPACK_ALTITUDE = 25;
+
 export class FpsControls {
   readonly state: FpsControlState = {
     forward: false,
@@ -29,6 +36,11 @@ export class FpsControls {
   private readonly direction = new Vector3();
   private readonly keys = new Set<string>();
   private locked = false;
+  private fuel = JETPACK_FUEL_MAX;
+
+  get fuelRatio(): number {
+    return this.fuel / JETPACK_FUEL_MAX;
+  }
 
   constructor(
     private readonly camera: PerspectiveCamera,
@@ -75,7 +87,39 @@ export class FpsControls {
     const playerRadius = 0.35;
     const stepHeight = 0.4;
 
+    const bodyFeetY = this.camera.position.y - playerHeight;
+    const bodyLowerY = bodyFeetY + stepHeight;
+    const headY = this.camera.position.y;
+
+    let airborne = false;
+    let jetpackActive = false;
+    let localGround = 0;
+
+    if (mode?.useTerrainHeight) {
+      localGround = mode.collision.getGroundHeight(this.camera.position.x, this.camera.position.z);
+      const ground = localGround + 0.05;
+      const colliderTop = mode.collision.supportHeight(
+        this.camera.position.x,
+        this.camera.position.z,
+        playerRadius,
+        bodyFeetY + stepHeight,
+      );
+      const support = Math.max(ground, colliderTop);
+      airborne = bodyFeetY > support + 0.05;
+      jetpackActive = this.state.jump && airborne && this.fuel > 0;
+      if (!airborne) {
+        this.fuel = Math.min(JETPACK_FUEL_MAX, this.fuel + JETPACK_RECHARGE_PER_SEC * delta);
+      }
+    }
+
     this.velocity.y -= gravity * delta;
+    if (jetpackActive) {
+      this.velocity.y += JETPACK_THRUST * delta;
+      this.fuel = Math.max(0, this.fuel - JETPACK_DRAIN_PER_SEC * delta);
+    }
+
+    const skipSteep =
+      mode?.useTerrainHeight && bodyFeetY > localGround + AIRBORNE_CLEARANCE;
 
     this.direction.set(0, 0, 0);
     if (this.state.forward) this.direction.z -= 1;
@@ -98,18 +142,13 @@ export class FpsControls {
       ? (x: number, y: number, z: number) => mode.collision.isSolid(x, y, z)
       : solidCheck;
 
-    // Capsule body spans from just above the feet (so low obstacles are
-    // steppable, not blocking) up to the eye/head.
-    const bodyFeetY = this.camera.position.y - playerHeight;
-    const bodyLowerY = bodyFeetY + stepHeight;
-    const headY = this.camera.position.y;
-
     const blockedX =
       this.collides(nextX, this.camera.position.y, this.camera.position.z, playerRadius, playerHeight, checkSolid) ||
       (mode
         ? mode.collision.blocksCapsuleBody(nextX, this.camera.position.z, playerRadius, bodyLowerY, headY)
         : false) ||
       (mode?.useTerrainHeight &&
+        !skipSteep &&
         isSteepTerrainBlocked(mode.collision, nextX, this.camera.position.z, this.camera.position.y));
 
     if (!blockedX) {
@@ -122,6 +161,7 @@ export class FpsControls {
         ? mode.collision.blocksCapsuleBody(this.camera.position.x, nextZ, playerRadius, bodyLowerY, headY)
         : false) ||
       (mode?.useTerrainHeight &&
+        !skipSteep &&
         isSteepTerrainBlocked(mode.collision, this.camera.position.x, nextZ, this.camera.position.y));
 
     if (!blockedZ) {
@@ -147,13 +187,13 @@ export class FpsControls {
         this.camera.position.z,
       );
 
-      if (undergroundSolid && this.velocity.y <= 0) {
+      if (!jetpackActive && undergroundSolid && this.velocity.y <= 0) {
         nextY = Math.max(support + playerHeight, nextFeetY + playerHeight);
         this.velocity.y = 0;
         if (this.state.jump) {
           this.velocity.y = 9;
         }
-      } else if (nextFeetY <= support && this.velocity.y <= 0) {
+      } else if (!jetpackActive && nextFeetY <= support && this.velocity.y <= 0) {
         nextY = support + playerHeight;
         this.velocity.y = 0;
         if (this.state.jump) {
@@ -184,6 +224,15 @@ export class FpsControls {
       }
       if (nextY > ceiling) {
         nextY = ceiling;
+        if (this.velocity.y > 0) this.velocity.y = 0;
+      }
+    }
+
+    if (mode?.useTerrainHeight) {
+      const groundY = mode.collision.getGroundHeight(this.camera.position.x, this.camera.position.z);
+      const maxY = groundY + playerHeight + MAX_JETPACK_ALTITUDE;
+      if (nextY > maxY) {
+        nextY = maxY;
         if (this.velocity.y > 0) this.velocity.y = 0;
       }
     }

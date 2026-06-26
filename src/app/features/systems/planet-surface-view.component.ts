@@ -29,7 +29,13 @@ import {
   WebGLRenderer,
 } from 'three';
 import { MarketData, PlanetView } from '../../models/system.model';
+import { SurfaceWeatherService } from '../../shared/services/surface-weather.service';
 import { isGasGiantWaypoint } from './planet-helpers';
+import {
+  initMineProgress,
+  mineProgressPercent,
+  recordOreBroken,
+} from '../../core/state/mine-progress.store';
 import { createPointerLockControls, FpsControls } from './three/fps-controls';
 import { getActiveZone, SurfaceZone } from './three/surface-zones';
 import { disposeObject3D } from './three/three-dispose.util';
@@ -49,6 +55,7 @@ import {
 } from './three/terrain/terrain-material';
 import { buildSkydome } from './three/surface-props.builder';
 import type { SurfaceZoneKind } from './three/system-view-mode';
+import type { SurfaceTraitProfile } from './three/surface-trait-profile';
 
 /** Seconds for one full surface day -> night -> day cycle. */
 const DAY_LENGTH_S = 150;
@@ -88,6 +95,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   readonly market = input<MarketData | null>(null);
 
   readonly zoneInteract = output<SurfaceZoneKind>();
+  readonly oreBroken = output<{ blockKey: string }>();
   readonly exitSurface = output<void>();
   readonly launchComplete = output<void>();
   readonly entryComplete = output<void>();
@@ -102,11 +110,16 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   readonly focusedStall = signal<MarketStallAnchor | null>(null);
   readonly tradeUnits = signal(1);
 
+  readonly mineProgressPct = signal<number | null>(null);
+  readonly weatherEvent = signal<string | null>(null);
+  readonly jetpackFuel = signal(1);
+
   goodLabel = goodLabel;
 
   @ViewChild('host', { static: true }) hostRef!: ElementRef<HTMLDivElement>;
 
   private readonly zone = inject(NgZone);
+  private readonly surfaceWeather = inject(SurfaceWeatherService);
   private scene!: Scene;
   private camera!: PerspectiveCamera;
   private renderer!: WebGLRenderer;
@@ -134,7 +147,11 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   private entryDuration = 2;
   private entrySeed = 0;
   private builtMarket: MarketData | null = null;
+  private activeProfile: SurfaceTraitProfile | null = null;
+  private baseFogNear = 60;
+  private baseFogFar = 220;
   private readonly projVec = new Vector3();
+  private readonly lookDir = new Vector3();
 
   constructor() {
     effect(() => {
@@ -173,6 +190,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.disposed = true;
+    this.surfaceWeather.reset();
     cancelAnimationFrame(this.animFrameId);
     this.fps?.detach();
     this.detachListeners();
@@ -335,16 +353,24 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     const gas = isGasGiantWaypoint(planet);
     this.zone.run(() => this.isGasGiant.set(gas));
 
-    if (gas) {
-      this.scene.background = new Color(0x4c1d95);
-      this.scene.fog = new Fog(0x4c1d95, 15, 80);
-    } else {
-      this.scene.background = new Color(0xc7e4ff);
-      this.scene.fog = new Fog(0xe8c896, 60, 220);
-    }
-
     this.world = buildSurfaceWorld(planet, market);
     this.scene.add(this.world.root);
+
+    const profile = this.world.profile;
+    this.activeProfile = profile;
+    this.surfaceWeather.configure(profile.weatherPool, profile.hazardLevel);
+
+    if (gas) {
+      this.scene.background = new Color(profile.skyTint);
+      this.scene.fog = new Fog(profile.fogColor, 15, 80);
+      this.baseFogNear = 15;
+      this.baseFogFar = 80;
+    } else {
+      this.scene.background = new Color(profile.skyTint);
+      this.scene.fog = new Fog(profile.fogColor, 60, 220);
+      this.baseFogNear = 60;
+      this.baseFogFar = 220;
+    }
 
     setTerrainSunDirection(
       this.world.terrainManager.material,
@@ -356,6 +382,16 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     this.camera.position.set(this.world.spawn.x, this.world.spawn.y, this.world.spawn.z);
     this.camera.rotation.set(0, 0, 0);
     this.world.terrainManager.update(this.world.spawn.x, this.world.spawn.z);
+
+    if (this.world.tunnels) {
+      this.world.tunnels.ensureBuilt();
+      const stored = initMineProgress(planet.name, this.world.tunnels.getTotalOres());
+      this.world.tunnels.applyBrokenKeys(stored.brokenKeys);
+      this.zone.run(() => this.mineProgressPct.set(mineProgressPercent(stored)));
+    } else {
+      this.zone.run(() => this.mineProgressPct.set(null));
+    }
+
     this.collectNightEmitters();
   }
 
@@ -407,6 +443,9 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
 
   private readonly onCanvasClick = (): void => {
     if (this.entryRunning()) return;
+    if (this.fps.isLocked()) {
+      if (this.activeZone()?.kind === 'mine' && this.tryMineBlock()) return;
+    }
     if (!this.fps.isLocked()) this.fps.requestLock();
   };
 
@@ -433,7 +472,9 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
       event.preventDefault();
       if (active.kind === 'market') {
         this.emitTrade('buy');
-      } else {
+      } else if (active.kind === 'mine') {
+        if (this.tryMineBlock()) return;
+        if (this.world?.cart?.tryPush(this.camera.position.x, this.camera.position.z)) return;
         this.zone.run(() => this.zoneInteract.emit(active.kind));
       }
       return;
@@ -452,6 +493,37 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     if (!stall) return;
     const units = this.tradeUnits();
     this.zone.run(() => this.marketTrade.emit({ symbol: stall.symbol, mode, units }));
+  }
+
+  private getLookDirection(): Vector3 {
+    this.camera.getWorldDirection(this.lookDir);
+    return this.lookDir;
+  }
+
+  private tryMineBlock(): boolean {
+    const world = this.world;
+    if (!world?.tunnels) return false;
+
+    const pick = world.tunnels.pickBlock(this.camera.position, this.getLookDirection());
+    if (!pick) return false;
+
+    const result = world.tunnels.breakBlock(pick.x, pick.y, pick.z);
+    if (!result) return false;
+
+    if (result.wasOre) {
+      const progress = recordOreBroken(
+        this.planet().name,
+        result.key,
+        world.tunnels.getTotalOres(),
+      );
+      this.zone.run(() => {
+        this.mineProgressPct.set(mineProgressPercent(progress));
+        this.oreBroken.emit({ blockKey: result.key });
+      });
+      world.cart?.load();
+    }
+
+    return true;
   }
 
   private computeFocusedStall(zone: SurfaceZone | null): MarketStallAnchor | null {
@@ -503,13 +575,25 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     });
   }
 
+  private updateSurfaceWeatherFog(): void {
+    if (!(this.scene.fog instanceof Fog)) return;
+    const shrink = 1 - this.surfaceWeather.intensity * 0.45;
+    this.scene.fog.near = this.baseFogNear * shrink;
+    this.scene.fog.far = this.baseFogFar * shrink;
+  }
+
   /**
    * Sweeps the sun across the sky over {@link DAY_LENGTH_S}: shadows rotate with
    * the light, sky/fog/ambient lerp through day -> dusk -> night, and tagged
    * building lights ramp on after dusk. Gas giants keep their static atmosphere.
    */
   private updateDayNight(elapsed: number): void {
-    if (!this.world || this.isGasGiant()) return;
+    if (!this.world) return;
+
+    if (this.isGasGiant()) {
+      this.updateSurfaceWeatherFog();
+      return;
+    }
 
     const angle = (elapsed / DAY_LENGTH_S) * Math.PI * 2;
     const elevation = Math.sin(angle);
@@ -517,6 +601,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
 
     const dayness = smoothstep(-0.08, 0.25, elevation); // 0 night -> 1 full day
     const night = 1 - dayness;
+    this.world.tunnels?.setNightVeinBoost(elevation < 0.12);
     // Warm tint while the sun rides low near the horizon.
     const dusk = Math.max(0, 1 - Math.abs(elevation) / 0.22) * dayness;
 
@@ -529,11 +614,14 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
       );
     }
     if (this.scene.fog instanceof Fog) {
+      const profile = this.activeProfile;
+      const fogDay = profile ? new Color(profile.fogColor) : FOG_DAY;
       this.scene.fog.color.copy(
-        this.fogScratch.copy(FOG_NIGHT).lerp(FOG_DAY, dayness).lerp(FOG_DUSK, dusk * 0.6),
+        this.fogScratch.copy(FOG_NIGHT).lerp(fogDay, dayness).lerp(FOG_DUSK, dusk * 0.6),
       );
-      this.scene.fog.near = 55;
-      this.scene.fog.far = 130 + dayness * 110;
+      const weatherShrink = 1 - this.surfaceWeather.intensity * 0.45;
+      this.scene.fog.near = this.baseFogNear * weatherShrink;
+      this.scene.fog.far = (this.baseFogFar * (0.6 + dayness * 0.4)) * weatherShrink;
     }
 
     this.hemi.intensity = 0.12 + dayness * 0.45;
@@ -559,7 +647,12 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
 
       if (this.world) {
         updateTerrainMaterialTime(this.world.terrainManager.material, elapsed);
+        this.surfaceWeather.update(performance.now());
         this.updateDayNight(elapsed);
+        const evt = this.surfaceWeather.event();
+        if (evt !== this.weatherEvent()) {
+          this.zone.run(() => this.weatherEvent.set(evt));
+        }
       }
 
       if (this.entryRunning()) {
@@ -597,6 +690,11 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
           () => false,
           { collision: this.world.collision, useTerrainHeight: true },
         );
+        this.zone.run(() => this.jetpackFuel.set(this.fps.fuelRatio));
+
+        if (this.world.cart) {
+          this.world.cart.update(delta);
+        }
 
         const zone = getActiveZone(
           this.camera.position.x,

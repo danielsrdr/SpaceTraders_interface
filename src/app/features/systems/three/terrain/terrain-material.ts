@@ -1,4 +1,5 @@
 import { Color, ShaderMaterial, Vector3 } from 'three';
+import type { SurfaceTraitProfile } from '../surface-trait-profile';
 
 const vertexShader = /* glsl */ `
   varying vec3 vWorldPos;
@@ -82,4 +83,10 @@ export function updateTerrainMaterialTime(material: ShaderMaterial, time: number
 
 export function setTerrainSunDirection(material: ShaderMaterial, x: number, y: number, z: number): void {
   material.uniforms['uSunDirection']!.value.set(x, y, z).normalize();
+}
+
+export function applyTerrainProfile(material: ShaderMaterial, profile: SurfaceTraitProfile): void {
+  material.uniforms['uSandColor']!.value.setHex(profile.sandColor);
+  material.uniforms['uRockColor']!.value.setHex(profile.rockColor);
+  material.uniforms['uGrassColor']!.value.setHex(profile.grassColor);
 }
