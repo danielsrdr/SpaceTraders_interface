@@ -96,3 +96,17 @@ export const GOODS_CODEX: string[] = [
   'BOTANICAL_SPECIMENS',
   'CULTURAL_ARTIFACTS',
 ];
+
+export interface SurfaceBiomeCodexEntry {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export const SURFACE_BIOME_CODEX: SurfaceBiomeCodexEntry[] = [
+  { id: 'jungle', label: 'Jungle', description: 'Dense canopy biomes with high moisture and thick undergrowth.' },
+  { id: 'industrial', label: 'Industrial', description: 'Scarred terrain near extraction sites and freight corridors.' },
+  { id: 'desert', label: 'Desert', description: 'Open dunes and dry basins swept by wind.' },
+  { id: 'rocky', label: 'Rocky', description: 'Bare stone ridges and fractured highlands.' },
+  { id: 'sand', label: 'Sand', description: 'Fine regolith plains common on arid or atmospheric moons.' },
+];

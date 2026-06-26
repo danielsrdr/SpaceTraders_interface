@@ -1,6 +1,7 @@
 import { computed, effect, inject, Injectable, signal, untracked } from '@angular/core';
 import { AgentStore } from '../../core/state/agent.store';
 import { DiscoveryStore } from '../../core/state/discovery.store';
+import { SurfaceDiscoveryStore } from '../../core/state/surface-discovery.store';
 import { SnackbarService } from '../../shared/services/snackbar.service';
 import {
   ACHIEVEMENT_BY_ID,
@@ -27,6 +28,7 @@ export interface RecentAchievement {
 @Injectable({ providedIn: 'root' })
 export class AchievementsService {
   private readonly discovery = inject(DiscoveryStore);
+  private readonly surfaceDiscovery = inject(SurfaceDiscoveryStore);
   private readonly agentStore = inject(AgentStore);
   private readonly snackbar = inject(SnackbarService);
 
@@ -35,16 +37,25 @@ export class AchievementsService {
 
   readonly total = ACHIEVEMENTS.length;
 
-  readonly snapshot = computed<ProgressSnapshot>(() => ({
-    peakCredits: this.discovery.peakCredits(),
-    lifetimeRevenue: this.discovery.lifetimeRevenue(),
-    lifetimeFuelBurned: this.discovery.lifetimeFuelBurned(),
-    routesFlown: this.discovery.routesFlown(),
-    systemsVisited: this.discovery.systemsVisited().size,
-    waypointTypesSeen: this.discovery.waypointTypesSeen().size,
-    factionsMet: this.discovery.factionsMet().size,
-    goodsSeen: this.discovery.goodsSeen().size,
-  }));
+  readonly snapshot = computed<ProgressSnapshot>(() => {
+    const storms = [...this.surfaceDiscovery.weatherSeen()].filter((w) =>
+      ['sand-storm', 'acid-rain', 'giant-winds'].includes(w),
+    ).length;
+    return {
+      peakCredits: this.discovery.peakCredits(),
+      lifetimeRevenue: this.discovery.lifetimeRevenue(),
+      lifetimeFuelBurned: this.discovery.lifetimeFuelBurned(),
+      routesFlown: this.discovery.routesFlown(),
+      systemsVisited: this.discovery.systemsVisited().size,
+      waypointTypesSeen: this.discovery.waypointTypesSeen().size,
+      factionsMet: this.discovery.factionsMet().size,
+      goodsSeen: this.discovery.goodsSeen().size,
+      planetsLanded: this.surfaceDiscovery.planetsLanded().size,
+      biomesSeen: this.surfaceDiscovery.biomesSeen().size,
+      stormsWitnessed: storms,
+      minesCompleted: this.surfaceDiscovery.minesCompleted(),
+    };
+  });
 
   readonly states = computed<AchievementProgress[]>(() => {
     const snap = this.snapshot();

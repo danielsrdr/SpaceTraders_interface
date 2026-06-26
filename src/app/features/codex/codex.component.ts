@@ -2,6 +2,7 @@ import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular
 import { FactionData } from '../../models/faction.model';
 import { SpaceTradersApiService } from '../../services/spacetraders-api.service';
 import { DiscoveryStore } from '../../core/state/discovery.store';
+import { SurfaceDiscoveryStore } from '../../core/state/surface-discovery.store';
 import { PageBackgroundService } from '../../shared/services/page-background.service';
 import { factionColor } from '../../shared/faction-colors';
 import { resolveWaypointType } from '../systems/planet-helpers';
@@ -9,11 +10,11 @@ import { goodCategory, goodLabel } from '../systems/trade-good-visuals';
 import { CodexThumbnailService } from './codex-thumbnail.service';
 import { CodexWaypointViewerComponent } from './codex-waypoint-viewer.component';
 import { CodexArtViewerComponent } from './codex-art-viewer.component';
-import { GOODS_CODEX, WAYPOINT_CODEX } from './codex-catalog';
+import { GOODS_CODEX, SURFACE_BIOME_CODEX, WAYPOINT_CODEX } from './codex-catalog';
 import { AchievementProgress } from './achievements';
 import { AchievementsService } from './achievements.service';
 
-export type CodexTab = 'waypoints' | 'factions' | 'goods' | 'achievements';
+export type CodexTab = 'waypoints' | 'factions' | 'goods' | 'surface' | 'achievements';
 
 export interface CodexCard {
   id: string;
@@ -44,6 +45,7 @@ const GOOD_CATEGORY_BLURB: Record<string, string> = {
 })
 export class CodexComponent implements OnInit, OnDestroy {
   readonly discovery = inject(DiscoveryStore);
+  readonly surfaceDiscovery = inject(SurfaceDiscoveryStore);
   readonly achievements = inject(AchievementsService);
   private readonly api = inject(SpaceTradersApiService);
   private readonly thumbnails = inject(CodexThumbnailService);
@@ -59,6 +61,7 @@ export class CodexComponent implements OnInit, OnDestroy {
     { id: 'waypoints', label: 'Waypoints' },
     { id: 'factions', label: 'Factions' },
     { id: 'goods', label: 'Goods' },
+    { id: 'surface', label: 'Surface' },
     { id: 'achievements', label: 'Achievements' },
   ];
 
@@ -100,6 +103,25 @@ export class CodexComponent implements OnInit, OnDestroy {
     }));
   });
 
+  readonly surfaceBiomeCards = computed<CodexCard[]>(() => {
+    const seen = this.surfaceDiscovery.biomesSeen();
+    return SURFACE_BIOME_CODEX.map((entry) => ({
+      id: entry.id,
+      label: entry.label,
+      sub: 'Surface biome',
+      description: entry.description,
+      unlocked: seen.has(entry.id),
+    }));
+  });
+
+  readonly surfaceMineEntries = computed(() => {
+    const map = this.surfaceDiscovery.maxMinePercent();
+    return Object.entries(map)
+      .filter(([, pct]) => pct > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([planet, pct]) => ({ planet, pct }));
+  });
+
   readonly activeCards = computed<CodexCard[]>(() => {
     const tab = this.tab();
     switch (tab) {
@@ -109,6 +131,8 @@ export class CodexComponent implements OnInit, OnDestroy {
         return this.factionCards();
       case 'goods':
         return this.goodCards();
+      case 'surface':
+        return this.surfaceBiomeCards();
       case 'achievements':
         return [];
       default: {
@@ -162,6 +186,8 @@ export class CodexComponent implements OnInit, OnDestroy {
         return this.thumbnails.factionThumbnail(card.id);
       case 'goods':
         return this.thumbnails.goodThumbnail(card.id);
+      case 'surface':
+        return '';
       case 'achievements':
         return '';
       default: {
@@ -181,6 +207,8 @@ export class CodexComponent implements OnInit, OnDestroy {
         return 'Encounter this faction (open its registry entry or take its contract) to reveal it.';
       case 'goods':
         return 'Trade or scan this good at a market to catalog it.';
+      case 'surface':
+        return 'Walk this biome on a planetary surface to log it.';
       case 'achievements':
         return '';
       default: {

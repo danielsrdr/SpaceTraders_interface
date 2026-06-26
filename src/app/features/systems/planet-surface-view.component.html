@@ -15,6 +15,11 @@
           Surface weather: {{ evt }}
         </p>
       }
+      @if (ambienceLabel(); as amb) {
+        <p class="rounded bg-slate-950/70 px-3 py-2 text-xs text-slate-300/90 ring-1 ring-slate-600/40">
+          Ambience: {{ amb }}
+        </p>
+      }
       @if (mineProgressPct() !== null) {
         <p class="rounded bg-cyan-950/80 px-3 py-2 text-xs text-cyan-200/90 ring-1 ring-cyan-500/30">
           Network excavated: {{ mineProgressPct() }}%
@@ -41,6 +46,9 @@
 
     <div class="flex flex-col items-center gap-2">
       @if (!entryRunning() && pointerLocked() && !launchActive()) {
+        <button type="button" class="pointer-events-auto sk-btn text-xs" (click)="openStamp()">
+          Stamp
+        </button>
         <div class="flex w-32 flex-col items-center gap-1">
           <span class="text-[10px] tracking-wider text-slate-500 uppercase">Jetpack</span>
           <div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-800/80 ring-1 ring-slate-600/40">
@@ -109,4 +117,6 @@
       <p class="mt-3 text-xs tracking-[0.3em] text-amber-200/70 uppercase">Descending to {{ planet().name }}</p>
     </div>
   }
+
+  <app-surface-postcard-dialog [options]="surfacePostcardOptions()" (close)="closeStamp()" />
 </div>

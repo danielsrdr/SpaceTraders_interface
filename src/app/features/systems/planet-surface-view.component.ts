@@ -28,11 +28,16 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import { MarketData, PlanetView } from '../../models/system.model';
+import { MarketData, PlanetView, ShipyardData } from '../../models/system.model';
+import { AgentStore } from '../../core/state/agent.store';
 import { SurfaceWeatherService } from '../../shared/services/surface-weather.service';
+import { SnackbarService } from '../../shared/services/snackbar.service';
+import { RadioService } from '../../shared/services/radio.service';
+import { ProgressionService } from '../progression/progression.service';
 import { isGasGiantWaypoint } from './planet-helpers';
 import {
   initMineProgress,
+  isOreAlreadyBroken,
   mineProgressPercent,
   recordOreBroken,
 } from '../../core/state/mine-progress.store';
@@ -44,6 +49,7 @@ import {
   buildMarketStructuresAt,
   MarketStallAnchor,
 } from './three/zone-buildings.builder';
+import { buildShipyardStructuresAt } from './three/zone-shipyard.builder';
 import {
   buildSurfaceWorld,
   disposeSurfaceWorldResult,
@@ -56,6 +62,9 @@ import {
 import { buildSkydome } from './three/surface-props.builder';
 import type { SurfaceZoneKind } from './three/system-view-mode';
 import type { SurfaceTraitProfile } from './three/surface-trait-profile';
+import { resolveSurfaceAmbience, surfaceAmbienceLabel } from './three/surface-ambience';
+import { SurfacePostcardDialogComponent } from '../postcard/surface-postcard-dialog.component';
+import type { SurfacePostcardOptions } from '../postcard/surface-postcard-canvas';
 
 /** Seconds for one full surface day -> night -> day cycle. */
 const DAY_LENGTH_S = 150;
@@ -86,6 +95,7 @@ export interface SurfacePoiLabel {
 @Component({
   selector: 'app-planet-surface-view',
   templateUrl: './planet-surface-view.component.html',
+  imports: [SurfacePostcardDialogComponent],
 })
 export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   readonly planet = input.required<PlanetView>();
@@ -93,9 +103,13 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   readonly marketPending = input(false);
   readonly entryActive = input(true);
   readonly market = input<MarketData | null>(null);
+  readonly shipyard = input<ShipyardData | null>(null);
+  readonly captain = input<{ name: string; faction: string; credits?: number } | null>(null);
 
   readonly zoneInteract = output<SurfaceZoneKind>();
   readonly oreBroken = output<{ blockKey: string }>();
+  readonly cartDelivered = output<void>();
+  readonly ruinsScanned = output<void>();
   readonly exitSurface = output<void>();
   readonly launchComplete = output<void>();
   readonly entryComplete = output<void>();
@@ -112,7 +126,9 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
 
   readonly mineProgressPct = signal<number | null>(null);
   readonly weatherEvent = signal<string | null>(null);
+  readonly ambienceLabel = signal<string | null>(null);
   readonly jetpackFuel = signal(1);
+  readonly surfacePostcardOptions = signal<SurfacePostcardOptions | null>(null);
 
   goodLabel = goodLabel;
 
@@ -120,6 +136,10 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
 
   private readonly zone = inject(NgZone);
   private readonly surfaceWeather = inject(SurfaceWeatherService);
+  private readonly agentStore = inject(AgentStore);
+  private readonly progression = inject(ProgressionService);
+  private readonly snackbar = inject(SnackbarService);
+  private readonly radio = inject(RadioService);
   private scene!: Scene;
   private camera!: PerspectiveCamera;
   private renderer!: WebGLRenderer;
@@ -147,7 +167,9 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   private entryDuration = 2;
   private entrySeed = 0;
   private builtMarket: MarketData | null = null;
+  private builtShipyard: ShipyardData | null = null;
   private activeProfile: SurfaceTraitProfile | null = null;
+  private lastZoneKind: SurfaceZoneKind | null = null;
   private baseFogNear = 60;
   private baseFogFar = 220;
   private readonly projVec = new Vector3();
@@ -165,6 +187,13 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
       if (!this.sceneReady || !this.world) return;
       if (m === this.builtMarket) return;
       this.rebuildMarket(m);
+    });
+
+    effect(() => {
+      const y = this.shipyard();
+      if (!this.sceneReady || !this.world) return;
+      if (y === this.builtShipyard) return;
+      this.rebuildShipyard(y);
     });
 
     effect(() => {
@@ -242,12 +271,41 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   private finishEntry(): void {
     if (this.world) {
       this.camera.position.set(this.world.spawn.x, this.world.spawn.y, this.world.spawn.z);
+      this.camera.rotation.set(0, this.world.spawnHeading, 0);
+      this.announceNearestBeacon();
     }
     this.zone.run(() => {
       this.entryVeil.set(0);
       this.entryRunning.set(false);
       this.entryComplete.emit();
     });
+  }
+
+  private announceNearestBeacon(): void {
+    const world = this.world;
+    if (!world?.poiAnchors.length) return;
+    let best = world.poiAnchors[0]!;
+    let bestDist = Infinity;
+    for (const anchor of world.poiAnchors) {
+      const dx = anchor.position.x - world.spawn.x;
+      const dz = anchor.position.z - world.spawn.z;
+      const dist = dx * dx + dz * dz;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = anchor;
+      }
+    }
+    const bearing = Math.round(
+      ((Math.atan2(best.position.x - world.spawn.x, best.position.z - world.spawn.z) * 180) /
+        Math.PI +
+        360) %
+        360,
+    );
+    this.radio.announce(`Beacon ${best.label} bearing ${bearing}° — proceed on foot.`);
+  }
+
+  private agentName(): string | null {
+    return this.agentStore.agent()?.name ?? null;
   }
 
   private computePoiLabels(active: SurfaceZone | null): SurfacePoiLabel[] {
@@ -291,6 +349,21 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
       typeof window !== 'undefined' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
     );
+  }
+
+  openStamp(): void {
+    const captain = this.captain();
+    if (!captain || !this.world) return;
+    this.surfacePostcardOptions.set({
+      planet: this.planet(),
+      profile: this.world.profile,
+      minePercent: this.mineProgressPct() ?? undefined,
+      captain,
+    });
+  }
+
+  closeStamp(): void {
+    this.surfacePostcardOptions.set(null);
   }
 
   exit(): void {
@@ -348,12 +421,14 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   private loadWorld(planet: PlanetView, market: MarketData | null): void {
     this.clearWorld();
     this.builtMarket = market;
+    this.builtShipyard = this.shipyard();
     this.focusedStall.set(null);
+    this.lastZoneKind = null;
 
     const gas = isGasGiantWaypoint(planet);
     this.zone.run(() => this.isGasGiant.set(gas));
 
-    this.world = buildSurfaceWorld(planet, market);
+    this.world = buildSurfaceWorld(planet, market, this.shipyard());
     this.scene.add(this.world.root);
 
     const profile = this.world.profile;
@@ -380,17 +455,23 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     );
 
     this.camera.position.set(this.world.spawn.x, this.world.spawn.y, this.world.spawn.z);
-    this.camera.rotation.set(0, 0, 0);
+    this.camera.rotation.set(0, this.world.spawnHeading, 0);
     this.world.terrainManager.update(this.world.spawn.x, this.world.spawn.z);
 
+    const agent = this.agentName();
     if (this.world.tunnels) {
       this.world.tunnels.ensureBuilt();
-      const stored = initMineProgress(planet.name, this.world.tunnels.getTotalOres());
+      const stored = initMineProgress(planet.name, this.world.tunnels.getTotalOres(), agent);
       this.world.tunnels.applyBrokenKeys(stored.brokenKeys);
-      this.zone.run(() => this.mineProgressPct.set(mineProgressPercent(stored)));
+      const pct = mineProgressPercent(stored);
+      this.zone.run(() => this.mineProgressPct.set(pct));
+      this.progression.recordSurfaceMinePercent(planet.name, pct);
     } else {
       this.zone.run(() => this.mineProgressPct.set(null));
     }
+
+    const ambience = resolveSurfaceAmbience(profile, this.surfaceWeather.event());
+    this.zone.run(() => this.ambienceLabel.set(surfaceAmbienceLabel(ambience.kind)));
 
     this.collectNightEmitters();
   }
@@ -427,6 +508,58 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     built.colliders.forEach((c) => world.colliders.add(c, 'market'));
     this.focusedStall.set(null);
     this.collectNightEmitters();
+  }
+
+  private rebuildShipyard(shipyard: ShipyardData | null): void {
+    const world = this.world;
+    this.builtShipyard = shipyard;
+    if (!world?.shipyardOrigin) return;
+
+    const existing = world.root.getObjectByName('shipyard-structures');
+    if (existing) {
+      world.root.remove(existing);
+      disposeObject3D(existing);
+    }
+
+    const built = buildShipyardStructuresAt(
+      world.shipyardOrigin.x,
+      world.shipyardOrigin.z,
+      world.shipyardOrigin.baseY,
+      shipyard,
+    );
+    world.root.add(built.group);
+    world.colliders.removeTag('shipyard');
+    built.colliders.forEach((c) => world.colliders.add(c, 'shipyard'));
+    this.collectNightEmitters();
+  }
+
+  private handleZoneInteract(kind: SurfaceZoneKind): void {
+    switch (kind) {
+      case 'market':
+        return;
+      case 'mine':
+        if (this.tryMineBlock()) return;
+        if (this.world?.cart?.tryPush(this.camera.position.x, this.camera.position.z)) return;
+        this.zone.run(() => this.zoneInteract.emit(kind));
+        break;
+      case 'shipyard':
+        this.zone.run(() => this.zoneInteract.emit(kind));
+        break;
+      case 'ruins':
+        this.snackbar.show('Ancient resonance logged — codex updated.', 'success', 3500);
+        this.zone.run(() => {
+          this.ruinsScanned.emit();
+          this.zoneInteract.emit(kind);
+        });
+        break;
+      case 'depot':
+        this.zone.run(() => this.zoneInteract.emit(kind));
+        break;
+      default: {
+        const _exhaustive: never = kind;
+        void _exhaustive;
+      }
+    }
   }
 
   private attachListeners(): void {
@@ -472,10 +605,8 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
       event.preventDefault();
       if (active.kind === 'market') {
         this.emitTrade('buy');
-      } else if (active.kind === 'mine') {
-        if (this.tryMineBlock()) return;
-        if (this.world?.cart?.tryPush(this.camera.position.x, this.camera.position.z)) return;
-        this.zone.run(() => this.zoneInteract.emit(active.kind));
+      } else {
+        this.handleZoneInteract(active.kind);
       }
       return;
     }
@@ -507,19 +638,29 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     const pick = world.tunnels.pickBlock(this.camera.position, this.getLookDirection());
     if (!pick) return false;
 
+    const planetName = this.planet().name;
+    const agent = this.agentName();
+    if (pick.isOre && isOreAlreadyBroken(planetName, pick.key, agent)) {
+      return false;
+    }
+
     const result = world.tunnels.breakBlock(pick.x, pick.y, pick.z);
     if (!result) return false;
 
     if (result.wasOre) {
       const progress = recordOreBroken(
-        this.planet().name,
+        planetName,
         result.key,
         world.tunnels.getTotalOres(),
+        agent,
       );
+      const pct = mineProgressPercent(progress);
       this.zone.run(() => {
-        this.mineProgressPct.set(mineProgressPercent(progress));
+        this.mineProgressPct.set(pct);
         this.oreBroken.emit({ blockKey: result.key });
       });
+      this.progression.recordSurfaceOreBroken();
+      this.progression.recordSurfaceMinePercent(planetName, pct);
       world.cart?.load();
     }
 
@@ -651,7 +792,14 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
         this.updateDayNight(elapsed);
         const evt = this.surfaceWeather.event();
         if (evt !== this.weatherEvent()) {
-          this.zone.run(() => this.weatherEvent.set(evt));
+          this.zone.run(() => {
+            this.weatherEvent.set(evt);
+            if (evt && this.activeProfile) {
+              this.progression.recordSurfaceWeather(evt);
+              const ambience = resolveSurfaceAmbience(this.activeProfile, evt);
+              this.ambienceLabel.set(surfaceAmbienceLabel(ambience.kind));
+            }
+          });
         }
       }
 
@@ -696,12 +844,22 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
           this.world.cart.update(delta);
         }
 
+        if (this.world.cart?.update(delta)) {
+          this.zone.run(() => this.cartDelivered.emit());
+        }
+
         const zone = getActiveZone(
           this.camera.position.x,
           this.camera.position.y - 1,
           this.camera.position.z,
           this.world.zones,
         );
+        if (zone && zone.kind !== this.lastZoneKind) {
+          this.lastZoneKind = zone.kind;
+          this.progression.recordSurfaceZone(zone.kind);
+        } else if (!zone) {
+          this.lastZoneKind = null;
+        }
         const poi = this.computePoiLabels(zone);
         const stall = this.computeFocusedStall(zone);
         this.zone.run(() => {

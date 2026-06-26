@@ -65,6 +65,36 @@
         </div>
       }
     </div>
+  } @else if (tab() === 'surface') {
+    <div class="flex flex-col gap-4">
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+        @for (card of activeCards(); track card.id) {
+          <div class="sk-panel flex flex-col items-center gap-2 text-center" [class.opacity-80]="!card.unlocked">
+            <p class="m-0 text-sm" [class]="card.unlocked ? 'text-white/90' : 'text-white/50'">
+              {{ card.unlocked ? card.label : '???' }}
+            </p>
+            <p class="m-0 text-[10px] text-white/45">{{ card.sub }}</p>
+          </div>
+        }
+      </div>
+      @if (surfaceMineEntries().length) {
+        <div class="sk-panel">
+          <h2 class="m-0 font-display text-sm tracking-widest text-cyan-200 uppercase">Mine networks</h2>
+          <ul class="m-0 mt-2 list-none space-y-1 p-0 text-xs text-white/70">
+            @for (row of surfaceMineEntries(); track row.planet) {
+              <li class="flex justify-between gap-2">
+                <span>{{ row.planet }}</span>
+                <span class="font-mono text-cyan-300">{{ row.pct }}%</span>
+              </li>
+            }
+          </ul>
+        </div>
+      }
+      <p class="m-0 text-[11px] text-white/45">
+        Planets landed: {{ surfaceDiscovery.planetsLanded().size }} · Ruins scanned:
+        {{ surfaceDiscovery.ruinsScanned().size }}
+      </p>
+    </div>
   } @else {
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
       @for (card of activeCards(); track card.id) {

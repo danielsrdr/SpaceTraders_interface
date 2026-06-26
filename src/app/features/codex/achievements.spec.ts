@@ -14,6 +14,10 @@ const EMPTY: ProgressSnapshot = {
   waypointTypesSeen: 0,
   factionsMet: 0,
   goodsSeen: 0,
+  planetsLanded: 0,
+  biomesSeen: 0,
+  stormsWitnessed: 0,
+  minesCompleted: 0,
 };
 
 describe('ACHIEVEMENTS catalog', () => {
@@ -49,5 +53,11 @@ describe('evaluateAchievement', () => {
     const unlocked = evaluateAchievement(achievement, { ...EMPTY, peakCredits: 1_000_000 });
     expect(locked.unlocked).toBe(false);
     expect(unlocked.unlocked).toBe(true);
+  });
+
+  it('unlocks footprinter at 1 planet landed', () => {
+    const achievement = ACHIEVEMENT_BY_ID.get('footprinter-1')!;
+    const result = evaluateAchievement(achievement, { ...EMPTY, planetsLanded: 1 });
+    expect(result.unlocked).toBe(true);
   });
 });

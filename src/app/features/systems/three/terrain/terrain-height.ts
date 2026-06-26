@@ -1,6 +1,31 @@
 import { fbm2d, noise2d } from './terrain-noise';
-import { PIT_FLOOR_Y, PIT_RADIUS, sampleMarketPadHeight, samplePitHeight, type MinePitConfig } from '../mine/mine-pit.builder';
+import {
+  PIT_FLOOR_Y,
+  PIT_RADIUS,
+  sampleMarketPadHeight,
+  samplePitHeight,
+  type MinePitConfig,
+} from '../mine/mine-pit.builder';
 import type { SurfacePoiConfig } from '../surface-poi';
+
+/** Flatten terrain under a generic zone pad. */
+export function sampleZonePadHeight(
+  x: number,
+  z: number,
+  centerX: number,
+  centerZ: number,
+  baseHeight: number,
+  radius = 10,
+): number | null {
+  const dist = Math.hypot(x - centerX, z - centerZ);
+  if (dist > radius + 4) return null;
+  const padY = baseHeight + 0.2;
+  if (dist > radius) {
+    const blend = (dist - radius) / 4;
+    return padY * (1 - blend) + baseHeight * blend;
+  }
+  return padY;
+}
 
 export type BiomeKind = 'jungle' | 'industrial' | 'desert' | 'rocky' | 'sand';
 
@@ -132,6 +157,24 @@ export class TerrainHeightField {
       if (padH !== null) h = padH;
     }
 
+    if (this.config.poi.shipyard) {
+      const { x: sx, z: sz } = this.config.poi.shipyard;
+      const padH = sampleZonePadHeight(x, z, sx + 5, sz + 5, h, 8);
+      if (padH !== null) h = padH;
+    }
+
+    if (this.config.poi.depot) {
+      const { x: dx, z: dz } = this.config.poi.depot;
+      const padH = sampleZonePadHeight(x, z, dx + 2, dz + 2, h, 6);
+      if (padH !== null) h = padH;
+    }
+
+    if (this.config.poi.ruins) {
+      const { x: rx, z: rz } = this.config.poi.ruins;
+      const padH = sampleZonePadHeight(x, z, rx, rz, h, 7);
+      if (padH !== null) h = padH;
+    }
+
     return h;
   }
 
@@ -160,6 +203,15 @@ export class TerrainHeightField {
       const angle = (((seed >> 4) % 360) * Math.PI) / 180;
       const x = mx + Math.cos(angle) * 12;
       const z = mz + Math.sin(angle) * 12;
+      const y = this.getHeight(x, z) + 2;
+      return { x, y, z };
+    }
+
+    if (poi.shipyard) {
+      const { x: sx, z: sz } = poi.shipyard;
+      const angle = (((seed >> 6) % 360) * Math.PI) / 180;
+      const x = sx + 5 + Math.cos(angle) * 14;
+      const z = sz + 5 + Math.sin(angle) * 14;
       const y = this.getHeight(x, z) + 2;
       return { x, y, z };
     }

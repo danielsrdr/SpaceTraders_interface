@@ -1,4 +1,5 @@
-const STORAGE_KEY = 'sk_mine_progress';
+const STORAGE_PREFIX = 'sk_mine_progress_';
+const LEGACY_KEY = 'sk_mine_progress';
 
 export interface PlanetMineProgress {
   oresBroken: number;
@@ -9,27 +10,41 @@ export interface PlanetMineProgress {
 
 type MineProgressMap = Record<string, PlanetMineProgress>;
 
-function readAll(): MineProgressMap {
+function storageKey(agentName?: string | null): string {
+  if (agentName) return `${STORAGE_PREFIX}${agentName}`;
+  return LEGACY_KEY;
+}
+
+function readAll(agentName?: string | null): MineProgressMap {
   if (typeof localStorage === 'undefined') return {};
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as MineProgressMap) : {};
+    const raw = localStorage.getItem(storageKey(agentName));
+    if (raw) return JSON.parse(raw) as MineProgressMap;
+    if (agentName) {
+      const legacy = localStorage.getItem(LEGACY_KEY);
+      if (legacy) return JSON.parse(legacy) as MineProgressMap;
+    }
+    return {};
   } catch {
     return {};
   }
 }
 
-function writeAll(map: MineProgressMap): void {
+function writeAll(map: MineProgressMap, agentName?: string | null): void {
   if (typeof localStorage === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+  localStorage.setItem(storageKey(agentName), JSON.stringify(map));
 }
 
-export function getMineProgress(planetName: string): PlanetMineProgress | null {
-  return readAll()[planetName] ?? null;
+export function getMineProgress(planetName: string, agentName?: string | null): PlanetMineProgress | null {
+  return readAll(agentName)[planetName] ?? null;
 }
 
-export function initMineProgress(planetName: string, totalOres: number): PlanetMineProgress {
-  const map = readAll();
+export function initMineProgress(
+  planetName: string,
+  totalOres: number,
+  agentName?: string | null,
+): PlanetMineProgress {
+  const map = readAll(agentName);
   const existing = map[planetName];
   if (existing && existing.totalOres === totalOres) {
     return existing;
@@ -41,12 +56,17 @@ export function initMineProgress(planetName: string, totalOres: number): PlanetM
     lastVisit: Date.now(),
   };
   map[planetName] = entry;
-  writeAll(map);
+  writeAll(map, agentName);
   return entry;
 }
 
-export function recordOreBroken(planetName: string, blockKey: string, totalOres: number): PlanetMineProgress {
-  const map = readAll();
+export function recordOreBroken(
+  planetName: string,
+  blockKey: string,
+  totalOres: number,
+  agentName?: string | null,
+): PlanetMineProgress {
+  const map = readAll(agentName);
   const entry = map[planetName] ?? {
     oresBroken: 0,
     totalOres,
@@ -60,7 +80,7 @@ export function recordOreBroken(planetName: string, blockKey: string, totalOres:
   entry.totalOres = totalOres;
   entry.lastVisit = Date.now();
   map[planetName] = entry;
-  writeAll(map);
+  writeAll(map, agentName);
   return entry;
 }
 
@@ -69,12 +89,17 @@ export function mineProgressPercent(progress: PlanetMineProgress | null): number
   return Math.round((progress.oresBroken / progress.totalOres) * 100);
 }
 
-export function isOreAlreadyBroken(planetName: string, blockKey: string): boolean {
-  const p = getMineProgress(planetName);
+export function isOreAlreadyBroken(
+  planetName: string,
+  blockKey: string,
+  agentName?: string | null,
+): boolean {
+  const p = getMineProgress(planetName, agentName);
   return p?.brokenKeys.includes(blockKey) ?? false;
 }
 
-export function clearMineProgressStorage(): void {
+export function clearMineProgressStorage(agentName?: string | null): void {
   if (typeof localStorage === 'undefined') return;
-  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(storageKey(agentName));
+  if (!agentName) localStorage.removeItem(LEGACY_KEY);
 }

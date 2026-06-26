@@ -49,6 +49,9 @@ type Biome = 'jungle' | 'industrial' | 'desert' | 'rocky' | 'sand';
 export interface PoiPositions {
   market: { x: number; z: number } | null;
   mine: { x: number; z: number } | null;
+  shipyard: { x: number; z: number } | null;
+  ruins: { x: number; z: number } | null;
+  depot: { x: number; z: number } | null;
 }
 
 export class VoxelChunkManager {
@@ -89,6 +92,9 @@ export class VoxelChunkManager {
       mine: this.hasMine
         ? { x: -12 - ((this.seed >> 6) % 8), z: -10 - ((this.seed >> 10) % 8) }
         : null,
+      shipyard: null,
+      ruins: null,
+      depot: null,
     };
 
     this.zones = buildProceduralSurfaceZones(this.hasMarket, this.hasMine, this.poi);

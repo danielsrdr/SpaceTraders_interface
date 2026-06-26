@@ -8,6 +8,10 @@ export interface ProgressSnapshot {
   waypointTypesSeen: number;
   factionsMet: number;
   goodsSeen: number;
+  planetsLanded: number;
+  biomesSeen: number;
+  stormsWitnessed: number;
+  minesCompleted: number;
 }
 
 export interface Achievement {
@@ -122,6 +126,25 @@ const FAMILIES: FamilyDef[] = [
       { threshold: 1_000, title: 'Burning Fuel', description: 'Burn 1,000 units of fuel.' },
       { threshold: 25_000, title: 'Gas Guzzler', description: 'Burn 25,000 units of fuel.' },
       { threshold: 250_000, title: 'Fuel Furnace', description: 'Burn 250,000 units of fuel.' },
+    ],
+  },
+  {
+    family: 'footprinter',
+    color: '#84cc16',
+    metric: (s) => s.planetsLanded,
+    tiers: [
+      { threshold: 1, title: 'First Footprint', description: 'Land on 1 planetary surface.' },
+      { threshold: 5, title: 'Trailblazer', description: 'Land on 5 different planetary surfaces.' },
+      { threshold: 25, title: 'World Walker', description: 'Land on 25 different planetary surfaces.' },
+    ],
+  },
+  {
+    family: 'prospector',
+    color: '#eab308',
+    metric: (s) => s.minesCompleted,
+    tiers: [
+      { threshold: 1, title: 'Vein Finder', description: 'Fully excavate a planetary mine network.' },
+      { threshold: 5, title: 'Deep Core', description: 'Fully excavate mine networks on 5 planets.' },
     ],
   },
 ];

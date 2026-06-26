@@ -159,6 +159,7 @@ import { shareOrCopyUrl } from '../../shared/share.util';
 import { PostcardDialogComponent } from '../postcard/postcard-dialog.component';
 
 import { PostcardOptions } from '../postcard/postcard-canvas';
+import { buildSurfaceTraitProfile } from './three/surface-trait-profile';
 
 
 
@@ -364,6 +365,12 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly contractWaypoints = signal<Set<string>>(new Set<string>());
 
   readonly postcardOptions = signal<PostcardOptions | null>(null);
+
+  readonly surfaceCaptain = computed(() => {
+    const agent = this.agentStore.agent();
+    if (!agent) return null;
+    return { name: agent.name, faction: agent.faction, credits: agent.credits };
+  });
 
   readonly transitTick = signal(0);
 
@@ -959,11 +966,41 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
     }
 
+    if (planet && hasTrait(planet, 'SHIPYARD')) {
+
+      void this.loadShipyard();
+
+    }
+
   }
 
   onSurfaceEntryComplete(): void {
 
     this.surfaceEntryActive.set(false);
+
+    const planet = this.selectedPlanet();
+
+    if (planet) {
+
+      const profile = buildSurfaceTraitProfile(planet);
+
+      const biomes = Object.entries(profile.biomeBias)
+
+        .filter(([, v]) => (v ?? 0) > 0.2)
+
+        .map(([k]) => k);
+
+      this.progression.recordSurfaceVisit({
+
+        planet,
+
+        biomes,
+
+        weather: this.surfaceWeather.event(),
+
+      });
+
+    }
 
   }
 
@@ -994,6 +1031,62 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!planet) return;
 
     if (kind === 'market') {
+
+      return;
+
+    }
+
+    if (kind === 'shipyard') {
+
+      await this.loadShipyard();
+
+      return;
+
+    }
+
+    if (kind === 'ruins') {
+
+      return;
+
+    }
+
+    if (kind === 'depot') {
+
+      const shipsHere = this.shipsForWaypoint(planet);
+
+      const ship = shipsHere.find((s) => shipDocked(s)) ?? shipsHere[0];
+
+      if (!ship) {
+
+        this.snackbar.show('Dock a ship at this waypoint to refuel', 'error');
+
+        return;
+
+      }
+
+      if (!shipDocked(ship)) {
+
+        try {
+
+          await this.api.dockShip(ship.symbol);
+
+          await this.loadShips();
+
+        } catch (error) {
+
+          this.snackbar.show(error instanceof Error ? error.message : 'Dock failed', 'error');
+
+          return;
+
+        }
+
+      }
+
+      this.refuelShipSymbol.set(ship.symbol);
+
+      this.refuelUnits.set(1);
+
+      await this.refuelShipAction();
 
       return;
 
@@ -1046,6 +1139,42 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
     }
 
     await this.extractResources(ship.symbol);
+
+  }
+
+
+
+  async onSurfaceCartDelivered(): Promise<void> {
+
+    const planet = this.selectedPlanet();
+
+    if (!planet) return;
+
+    const ship = await this.resolveOrbitShipForExtraction(planet);
+
+    if (!ship) {
+
+      this.snackbar.show('Cart arrived — no ship in orbit to receive cargo', 'warning');
+
+      return;
+
+    }
+
+    this.snackbar.show('Cart delivered ore to the ramp — bonus extraction', 'success', 3500);
+
+    await this.extractResources(ship.symbol);
+
+  }
+
+
+
+  onSurfaceRuinsScanned(): void {
+
+    const planet = this.selectedPlanet();
+
+    if (!planet) return;
+
+    this.progression.recordRuinsScanned(planet.name);
 
   }
 

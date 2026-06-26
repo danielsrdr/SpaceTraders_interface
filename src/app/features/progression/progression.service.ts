@@ -1,7 +1,10 @@
 import { inject, Injectable } from '@angular/core';
 import { AnalyticsStore } from '../../core/state/analytics.store';
 import { DiscoveryStore } from '../../core/state/discovery.store';
+import { SurfaceDiscoveryStore } from '../../core/state/surface-discovery.store';
 import { ShipData } from '../../models/ship.model';
+import { PlanetView } from '../../models/system.model';
+import type { SurfaceWeatherKind } from '../systems/three/surface-trait-profile';
 
 /**
  * Thin facade that records gameplay outcomes into both progression stores:
@@ -14,6 +17,7 @@ import { ShipData } from '../../models/ship.model';
 export class ProgressionService {
   private readonly analytics = inject(AnalyticsStore);
   private readonly discovery = inject(DiscoveryStore);
+  private readonly surfaceDiscovery = inject(SurfaceDiscoveryStore);
 
   recordTrade(input: {
     mode: 'buy' | 'sell';
@@ -121,5 +125,43 @@ export class ProgressionService {
         this.discovery.markWaypointType(ship.nav.route?.destination?.type);
       }
     }
+  }
+
+  recordSurfaceVisit(input: {
+    planet: PlanetView;
+    biomes?: string[];
+    weather?: SurfaceWeatherKind | null;
+    zones?: string[];
+  }): void {
+    this.surfaceDiscovery.markPlanetLanded(input.planet.name);
+    for (const biome of input.biomes ?? []) {
+      this.surfaceDiscovery.markBiome(biome);
+    }
+    if (input.weather) {
+      this.surfaceDiscovery.markWeather(input.weather);
+    }
+    for (const zone of input.zones ?? []) {
+      this.surfaceDiscovery.markZone(zone);
+    }
+  }
+
+  recordSurfaceZone(kind: string): void {
+    this.surfaceDiscovery.markZone(kind);
+  }
+
+  recordSurfaceWeather(kind: SurfaceWeatherKind): void {
+    this.surfaceDiscovery.markWeather(kind);
+  }
+
+  recordSurfaceMinePercent(planetName: string, percent: number): void {
+    this.surfaceDiscovery.recordMinePercent(planetName, percent);
+  }
+
+  recordSurfaceOreBroken(): void {
+    this.surfaceDiscovery.incrementOresBroken();
+  }
+
+  recordRuinsScanned(planetName: string): void {
+    this.surfaceDiscovery.markRuinsScanned(planetName);
   }
 }
