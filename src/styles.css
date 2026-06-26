@@ -1805,9 +1805,10 @@ body:has(.sk-system-layout) .sk-flight-hud--embedded {
 
 body:has(.sk-system-layout) .sk-flight-radar--embedded {
   position: fixed;
-  right: 1rem;
+  right: var(--sk-bottom-chrome-right);
   bottom: 6.25rem;
   z-index: 33;
+  transition: right 0.22s var(--ease-out-soft);
 }
 
 body:has(.sk-system-layout) .sk-logbook-trigger {
@@ -1815,12 +1816,14 @@ body:has(.sk-system-layout) .sk-logbook-trigger {
   left: auto;
   right: var(--sk-bottom-chrome-right);
   bottom: 0.75rem;
+  transition: right 0.22s var(--ease-out-soft);
 }
 
 body:has(.sk-system-layout) .sk-notifications-trigger {
   top: auto;
   right: calc(var(--sk-bottom-chrome-right) + var(--sk-log-btn-w));
   bottom: 0.75rem;
+  transition: right 0.22s var(--ease-out-soft);
 }
 
 body:has(.sk-system-layout) .sk-sidebar-panel {
