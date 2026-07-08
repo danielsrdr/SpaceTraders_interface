@@ -1,7 +1,12 @@
-import { computed, inject, Injectable, signal } from '@angular/core';
+import { computed, inject, Injectable, isDevMode, signal } from '@angular/core';
 import { ShipData } from '../../models/ship.model';
 import { SpaceTradersApiService } from '../../services/spacetraders-api.service';
 import { shipInSystem, shipsOnMap, evictStableTransitProgressOnRefresh } from '../../features/systems/planet-helpers';
+
+export interface FleetRefreshOptions {
+  /** When true, skip user-facing error feedback (silent polling / Lot 5 API layer). */
+  suppressUi?: boolean;
+}
 
 @Injectable({ providedIn: 'root' })
 export class FleetStore {
@@ -9,6 +14,7 @@ export class FleetStore {
 
   readonly ships = signal<ShipData[]>([]);
   readonly selectedShipSymbol = signal<string | null>(null);
+  readonly refreshError = signal<string | null>(null);
 
   readonly selectedShip = computed(() => {
     const symbol = this.selectedShipSymbol();
@@ -48,18 +54,25 @@ export class FleetStore {
     if (ship) this.selectedShipSymbol.set(ship.symbol);
   }
 
-  async refreshShips(): Promise<ShipData[]> {
+  async refreshShips(options?: FleetRefreshOptions): Promise<ShipData[]> {
     try {
       const prev = this.ships();
       const list = await this.api.getAllShips();
       evictStableTransitProgressOnRefresh(prev, list);
       this.ships.set(list);
+      this.refreshError.set(null);
       const selected = this.selectedShipSymbol();
       if (selected && !list.some((s) => s.symbol === selected)) {
         this.selectedShipSymbol.set(null);
       }
       return list;
-    } catch {
+    } catch (error) {
+      if (isDevMode()) {
+        console.debug('[FleetStore] refreshShips failed', error);
+      }
+      if (!options?.suppressUi) {
+        this.refreshError.set(error instanceof Error ? error.message : 'Failed to refresh fleet');
+      }
       return this.ships();
     }
   }

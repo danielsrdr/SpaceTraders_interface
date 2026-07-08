@@ -1,22 +1,59 @@
-import { describe, expect, it } from 'vitest';
+import { TestBed } from '@angular/core/testing';
+import { AgentStore } from './agent.store';
+import { NotificationStore } from './notification.store';
 
-const MAX_ENTRIES = 100;
+const AGENT = 'Notify-Pilot';
+const STORAGE_KEY = `sk_notifications_${AGENT}`;
 
-function trimEntries<T>(list: T[]): T[] {
-  return list.length > MAX_ENTRIES ? list.slice(list.length - MAX_ENTRIES) : list;
+function setAgent(): void {
+  TestBed.inject(AgentStore).setAgent({
+    token: 't',
+    name: AGENT,
+    faction: 'COSMIC',
+    credits: 0,
+    hq: 'X1-TEST',
+    ships_cpt: 1,
+  });
 }
 
-describe('NotificationStore trim logic', () => {
+describe('NotificationStore', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    TestBed.configureTestingModule({
+      providers: [AgentStore, NotificationStore],
+    });
+  });
+
   it('caps list at 100 entries', () => {
-    const list = Array.from({ length: 105 }, (_, i) => i);
-    expect(trimEntries(list)).toHaveLength(100);
-    expect(trimEntries(list)[0]).toBe(5);
+    setAgent();
+    const store = TestBed.inject(NotificationStore);
+    store.attach(AGENT);
+    for (let i = 0; i < 105; i++) {
+      store.push({ category: 'system', severity: 'info', title: `Entry ${i}` });
+    }
+    expect(store.entries()).toHaveLength(100);
+    expect(store.entries()[0]?.title).toBe('Entry 5');
   });
 
   it('tracks unread until marked read', () => {
-    const entries = [{ read: false }, { read: false }];
-    expect(entries.filter((e) => !e.read).length).toBe(2);
-    const read = entries.map((e) => ({ ...e, read: true }));
-    expect(read.filter((e) => !e.read).length).toBe(0);
+    setAgent();
+    const store = TestBed.inject(NotificationStore);
+    store.attach(AGENT);
+    store.push({ category: 'arrival', severity: 'success', title: 'Ship arrived' });
+    store.push({ category: 'trade', severity: 'info', title: 'Trade complete' });
+    expect(store.unreadCount()).toBe(2);
+    store.markAllRead();
+    expect(store.unreadCount()).toBe(0);
+  });
+
+  it('persists entries per agent', () => {
+    setAgent();
+    const store = TestBed.inject(NotificationStore);
+    store.attach(AGENT);
+    store.push({ category: 'contract', severity: 'info', title: 'New contract' });
+
+    const raw = localStorage.getItem(STORAGE_KEY);
+    expect(raw).toBeTruthy();
+    expect(JSON.parse(raw!)[0]?.title).toBe('New contract');
   });
 });

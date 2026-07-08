@@ -1,51 +1,69 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { TestBed } from '@angular/core/testing';
+import { AgentStore } from './agent.store';
+import { SessionStore } from './session.store';
 
-const STORAGE_PREFIX = 'sk_session_';
+const AGENT = 'Session-Pilot';
+const STORAGE_KEY = `sk_session_${AGENT}`;
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-const IGNORED_ROUTES = new Set(['/login', '/register', '/home']);
 
-interface SessionSnapshot {
-  route: string;
-  queryParams?: Record<string, string>;
-  timestamp: number;
+function setAgent(): void {
+  TestBed.inject(AgentStore).setAgent({
+    token: 't',
+    name: AGENT,
+    faction: 'COSMIC',
+    credits: 0,
+    hq: 'X1-TEST',
+    ships_cpt: 1,
+  });
 }
 
-function shouldPersist(route: string): boolean {
-  return !IGNORED_ROUTES.has(route);
-}
-
-function isValidSnapshot(snap: SessionSnapshot | null, now = Date.now()): boolean {
-  if (!snap?.route || !snap.timestamp) return false;
-  return now - snap.timestamp < MAX_AGE_MS;
-}
-
-describe('SessionStore rules', () => {
-  beforeEach(() => localStorage.clear());
-  afterEach(() => localStorage.clear());
+describe('SessionStore', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    TestBed.configureTestingModule({
+      providers: [AgentStore, SessionStore],
+    });
+  });
 
   it('persists snapshot to localStorage', () => {
-    const snap: SessionSnapshot = {
-      route: '/systems',
-      queryParams: { name: 'X1-Y1' },
-      timestamp: Date.now(),
-    };
-    localStorage.setItem(`${STORAGE_PREFIX}TESTAGENT`, JSON.stringify(snap));
-    const loaded = JSON.parse(localStorage.getItem(`${STORAGE_PREFIX}TESTAGENT`)!) as SessionSnapshot;
+    setAgent();
+    const store = TestBed.inject(SessionStore);
+    store.save({ route: '/systems', queryParams: { name: 'X1-Y1' } });
+
+    const loaded = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
     expect(loaded.route).toBe('/systems');
-    expect(isValidSnapshot(loaded)).toBe(true);
+    expect(store.hasValidSnapshot()).toBe(true);
   });
 
   it('ignores login and home routes', () => {
-    expect(shouldPersist('/login')).toBe(false);
-    expect(shouldPersist('/home')).toBe(false);
-    expect(shouldPersist('/systems')).toBe(true);
+    setAgent();
+    const store = TestBed.inject(SessionStore);
+    store.save({ route: '/login' });
+    store.save({ route: '/home' });
+    expect(store.snapshot()).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
-  it('rejects expired snapshots', () => {
-    const snap: SessionSnapshot = {
-      route: '/contracts',
-      timestamp: Date.now() - MAX_AGE_MS - 1,
-    };
-    expect(isValidSnapshot(snap)).toBe(false);
+  it('rejects expired snapshots on load', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        route: '/contracts',
+        timestamp: Date.now() - MAX_AGE_MS - 1,
+      }),
+    );
+    setAgent();
+    const store = TestBed.inject(SessionStore);
+    expect(store.snapshot()).toBeNull();
+    expect(store.hasValidSnapshot()).toBe(false);
+  });
+
+  it('clear removes persisted snapshot', () => {
+    setAgent();
+    const store = TestBed.inject(SessionStore);
+    store.save({ route: '/systems' });
+    store.clear();
+    expect(store.snapshot()).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 });

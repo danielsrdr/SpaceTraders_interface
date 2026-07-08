@@ -1,4 +1,4 @@
-import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { AgentStore } from '../../core/state/agent.store';
 import { AnalyticsStore } from '../../core/state/analytics.store';
@@ -45,6 +45,7 @@ const BUCKETS = 24;
   selector: 'app-dashboard',
   imports: [SparklineComponent, PeriodDeltaComponent],
   templateUrl: './dashboard.component.html',
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class DashboardComponent implements OnInit, OnDestroy {
   private readonly analytics = inject(AnalyticsStore);

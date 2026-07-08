@@ -50,6 +50,13 @@ export function displayMeanMotion(semiMajorKm: number, parentMu: number): number
   return Math.min(MAX_ORBIT_OMEGA, Math.max(MIN_ORBIT_OMEGA, n));
 }
 
+/** Kepler mean motion with visual time scale but without omega clamp (for ratio tests). */
+export function displayMeanMotionUnclamped(semiMajorKm: number, parentMu: number): number {
+  const a = Math.max(MIN_ORBIT_RADIUS_KM, semiMajorKm);
+  const nSim = Math.sqrt(parentMu / (a * a * a));
+  return nSim * orbitVisualTimeScale(parentMu);
+}
+
 /** Estimated revolution period in seconds at the given semi-major axis. */
 export function orbitPeriodSec(semiMajorKm: number, parentMu: number): number {
   const n = displayMeanMotion(semiMajorKm, parentMu);

@@ -170,8 +170,8 @@ export class SurfaceMapBridgeService {
       this.radio.announce(`Contract delivery confirmed — ${units} units logged.`);
 
       const contracts = await this.api.getContracts();
-      this.mapStore.activeContracts = contracts;
-      const contract = this.mapStore.activeContracts.find((c) => c.id === beacon.contractId);
+      this.mapStore.activeContracts.set(contracts);
+      const contract = this.mapStore.activeContracts().find((c) => c.id === beacon.contractId);
       if (contract && contract.deliver.every((d) => (d.unitsFulfilled ?? 0) >= d.unitsRequired)) {
         await this.api.fulfillContract(beacon.contractId);
         this.progression.recordContract({

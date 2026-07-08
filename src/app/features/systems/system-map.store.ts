@@ -34,7 +34,7 @@ export class SystemMapStore {
   readonly surfaceContractBeacons = signal<SurfaceContractBeacon[]>([]);
   readonly transitTick = signal(0);
 
-  activeContracts: ContractView[] = [];
+  readonly activeContracts = signal<ContractView[]>([]);
 
   readonly ships = this.fleetStore.ships;
   readonly selectedShip = this.fleetStore.selectedShip;
@@ -116,10 +116,10 @@ export class SystemMapStore {
     }
     try {
       const raw = await this.api.getContracts();
-      this.activeContracts = raw;
+      this.activeContracts.set(raw);
       const pois = buildSurfacePoiConfig(planet).pois;
       this.surfaceContractBeacons.set(
-        resolveSurfaceContractBeacons(this.activeContracts, planet, pois),
+        resolveSurfaceContractBeacons(this.activeContracts(), planet, pois),
       );
     } catch {
       this.surfaceContractBeacons.set([]);

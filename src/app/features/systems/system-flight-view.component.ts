@@ -92,6 +92,18 @@ import { factionColor } from '../../shared/faction-colors';
 import { computeMarkerSignature, ShipMarkerManager } from './three/ship-marker.manager';
 import { TransitArcManager } from './three/transit-arc.manager';
 import { disposeObject3D } from './three/three-dispose.util';
+import { applyCameraShake, prefersReducedMotion } from './three/motion.util';
+import {
+  createAdaptiveQualityState,
+  decideAdaptiveQuality,
+  sampleFrameTimeEma,
+} from './three/flight/flight-adaptive-quality';
+import {
+  applyFlightCameraShake,
+  triggerActionPulse as triggerFlightActionPulse,
+  type CameraShakeState,
+} from './three/flight/flight-camera.controller';
+import { drawFlightRadar, shouldRedrawRadar } from './three/flight/flight-radar.renderer';
 
 interface PlanetEntry {
   planet: PlanetView;
@@ -288,8 +300,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private disposed = false;
   private sceneReady = false;
   private radarFlashUntil = 0;
-  private shakeUntil = 0;
-  private shakeSeed = 0;
+  private readonly cameraShake: CameraShakeState = { shakeUntil: 0, shakeSeed: 0 };
+  private readonly adaptiveQuality = createAdaptiveQualityState();
   private launchHandoffRunning = false;
   private lastPointerClientX = 0;
   private lastPointerClientY = 0;
@@ -334,9 +346,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
   // Frame-time instrumentation + adaptive quality.
   private readonly devMode = isDevMode();
-  private frameMsEma = 0;
   private frameSampleCount = 0;
-  private overBudgetMs = 0;
   private lowPixelRatio = false;
   private lastRadarDraw = 0;
 
@@ -1242,7 +1252,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       return;
     }
     this.landingFade.set(0);
-    this.shakeSeed = Math.random() * 1000;
+    this.cameraShake.shakeSeed = Math.random() * 1000;
     this.orbitEngine.getWorldPosition(planet.name, this.tempVec);
     this.landing.start(
       this.shipGroup.position,
@@ -1564,12 +1574,12 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
   /** Tracks an EMA of ms/frame and drives adaptive quality. */
   private sampleFrameTime(ms: number): void {
-    this.frameMsEma = this.frameMsEma === 0 ? ms : this.frameMsEma * 0.9 + ms * 0.1;
+    sampleFrameTimeEma(this.adaptiveQuality, ms);
     this.frameSampleCount++;
     if (this.devMode && this.frameSampleCount % 120 === 0) {
-      const fps = this.frameMsEma > 0 ? 1000 / this.frameMsEma : 0;
+      const fps = this.adaptiveQuality.frameMsEma > 0 ? 1000 / this.adaptiveQuality.frameMsEma : 0;
       console.debug(
-        `[system-flight-view] ~${this.frameMsEma.toFixed(2)} ms/frame (${fps.toFixed(0)} fps), ` +
+        `[system-flight-view] ~${this.adaptiveQuality.frameMsEma.toFixed(2)} ms/frame (${fps.toFixed(0)} fps), ` +
           `bloom=${this.highQuality() ? 'on' : 'off'}, pixelRatio=${this.renderer.getPixelRatio().toFixed(2)}`,
       );
     }
@@ -1579,35 +1589,23 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   /** Drops bloom (then pixel ratio) when the frame budget is sustained-blown,
    * and recovers once headroom returns. Manual bloom toggle disables auto-bloom. */
   private updateAdaptiveQuality(ms: number): void {
-    const BUDGET_MS = 22; // ~45fps
-    const RECOVER_MS = BUDGET_MS * 0.6;
-
-    if (this.frameMsEma > BUDGET_MS) {
-      this.overBudgetMs += ms;
-    } else if (this.frameMsEma < RECOVER_MS) {
-      this.overBudgetMs = Math.max(0, this.overBudgetMs - ms * 2);
+    const decision = decideAdaptiveQuality(
+      this.adaptiveQuality,
+      ms,
+      this.highQuality(),
+      this.bloomManual,
+    );
+    if (decision.highQuality !== this.highQuality()) {
+      this.highQuality.set(decision.highQuality);
     }
 
-    const sustainedOver = this.overBudgetMs > 1000;
-    const sustainedHeadroom = this.frameMsEma < RECOVER_MS && this.overBudgetMs === 0;
-
-    if (!this.bloomManual) {
-      if (sustainedOver && this.highQuality()) {
-        this.highQuality.set(false);
-        this.overBudgetMs = 0;
-        return;
-      }
-      if (sustainedHeadroom && !this.highQuality()) {
-        this.highQuality.set(true);
-        return;
-      }
-    }
-
-    // Last resort once bloom is already off: halve pixel ratio on HiDPI.
+    const sustainedOver = this.adaptiveQuality.overBudgetMs > 1000;
+    const sustainedHeadroom =
+      this.adaptiveQuality.frameMsEma < 13.2 && this.adaptiveQuality.overBudgetMs === 0;
     const wantLow = sustainedOver && !this.highQuality();
     if (wantLow && !this.lowPixelRatio) {
       this.lowPixelRatio = true;
-      this.overBudgetMs = 0;
+      this.adaptiveQuality.overBudgetMs = 0;
       this.resize();
     } else if (sustainedHeadroom && this.lowPixelRatio) {
       this.lowPixelRatio = false;
@@ -1711,31 +1709,18 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private triggerActionPulse(): void {
     const now = performance.now();
     this.radarFlashUntil = now + 450;
-    if (!this.prefersReducedMotion()) {
-      this.shakeUntil = now + 320;
-      this.shakeSeed = Math.random() * 1000;
+    if (!prefersReducedMotion()) {
+      triggerFlightActionPulse(now, this.cameraShake);
     }
   }
 
   private applyCameraShake(): void {
-    const now = performance.now();
-    let amp = now < this.shakeUntil ? 0.35 * ((this.shakeUntil - now) / 320) : 0;
-
-    if (this.landingActive() && this.landing.target && !this.prefersReducedMotion()) {
-      amp = Math.max(amp, 0.12 + this.landing.descentProgress * 0.55);
-    }
-
-    if (amp <= 0) return;
-    const t = now * 0.05 + this.shakeSeed;
-    this.camera.position.x += Math.sin(t * 1.7) * amp;
-    this.camera.position.y += Math.cos(t * 2.3) * amp;
-    this.camera.position.z += Math.sin(t * 1.1) * amp;
-  }
-
-  private prefersReducedMotion(): boolean {
-    return (
-      typeof window !== 'undefined' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    applyFlightCameraShake(
+      this.camera.position,
+      performance.now(),
+      this.cameraShake,
+      this.landingActive() && !!this.landing.target,
+      this.landing.descentProgress,
     );
   }
 
@@ -1778,102 +1763,29 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     const canvas = this.radarRef?.nativeElement;
     if (!canvas) return;
 
-    // Throttle to ~12fps; the radar reads fine at a low refresh. Always redraw
-    // while the action-pulse flash is animating so it stays smooth.
     const now = performance.now();
-    if (now < this.radarFlashUntil || now - this.lastRadarDraw >= 83) {
-      this.lastRadarDraw = now;
-    } else {
-      return;
-    }
+    if (!shouldRedrawRadar(now, this.lastRadarDraw, this.radarFlashUntil)) return;
+    this.lastRadarDraw = now;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const w = canvas.width;
-    const h = canvas.height;
-    const cx = w / 2;
-    const cy = h / 2;
     const range = Math.max(80, this.orbitEngine.sceneExtent(this.planets()) * 0.85);
-    // Sensor quality shrinks detection range and adds static (fog of war).
     const q = this.spaceWeather.sensorQuality;
-    const detectRange = range * (0.4 + 0.6 * q);
-    const jitter = (1 - q) * 3;
-
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = 'rgba(10, 14, 26, 0.85)';
-    ctx.beginPath();
-    ctx.arc(cx, cy, cx - 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)';
-    ctx.lineWidth = 1;
-    for (let r = 0.25; r <= 1; r += 0.25) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, (cx - 4) * r, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.beginPath();
-    ctx.moveTo(cx, 4);
-    ctx.lineTo(cx, h - 4);
-    ctx.moveTo(4, cy);
-    ctx.lineTo(w - 4, cy);
-    ctx.stroke();
-
     const anchor = this.followPosition;
-    for (const entry of this.planetEntries) {
-      const dx = entry.group.position.x - anchor.x;
-      const dz = entry.group.position.z - anchor.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist > detectRange) continue;
-      const px = cx + (dx / range) * (cx - 8) + (Math.random() - 0.5) * jitter;
-      const py = cy + (dz / range) * (cy - 8) + (Math.random() - 0.5) * jitter;
-      ctx.fillStyle = '#38bdf8';
-      ctx.beginPath();
-      ctx.arc(px, py, 4, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    const blips = this.planetEntries.map((entry) => ({
+      dx: entry.group.position.x - anchor.x,
+      dz: entry.group.position.z - anchor.z,
+    }));
 
-    ctx.fillStyle = '#f97316';
-    ctx.beginPath();
-    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Sensor interference: static speckle + wash that grows as quality drops.
-    if (q < 0.985) {
-      const noise = 1 - q;
-      const speckles = Math.floor(noise * 90);
-      ctx.fillStyle = 'rgba(190, 220, 255, 0.5)';
-      for (let i = 0; i < speckles; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const r = Math.random() * (cx - 4);
-        ctx.fillRect(cx + Math.cos(a) * r, cy + Math.sin(a) * r, 1.5, 1.5);
-      }
-      ctx.save();
-      ctx.globalAlpha = noise * 0.28;
-      ctx.fillStyle = '#f8b65a';
-      ctx.beginPath();
-      ctx.arc(cx, cy, cx - 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-
-    if (now < this.radarFlashUntil) {
-      const intensity = (this.radarFlashUntil - now) / 450;
-      ctx.save();
-      ctx.globalAlpha = 0.45 * intensity;
-      ctx.fillStyle = '#86f7b0';
-      ctx.beginPath();
-      ctx.arc(cx, cy, cx - 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 0.9 * intensity;
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#bdffd6';
-      ctx.beginPath();
-      ctx.arc(cx, cy, (cx - 4) * (1 - intensity), 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
+    drawFlightRadar({
+      canvas,
+      anchorX: anchor.x,
+      anchorZ: anchor.z,
+      range,
+      detectRange: range * (0.4 + 0.6 * q),
+      sensorQuality: q,
+      blips,
+      flashUntil: this.radarFlashUntil,
+      now,
+    });
   }
 
   godFilterLabel(filter: GodViewFilter): string {

@@ -1,10 +1,8 @@
 import { inject, Injectable } from '@angular/core';
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
 import { SPACETRADERS_CONFIG } from '../core/config/spacetraders.config';
-import { CacheService } from './cache.service';
-import { RateLimiterService } from './rate-limiter.service';
-import { TokenStorageService } from './token-storage.service';
+import { AgentApiService } from '../core/api/agent-api.service';
+import { ApiRequestService } from '../core/api/api-request.service';
+import { SpaceTradersApiError } from '../core/api/spacetraders-api-error';
 import {
   ApiResponse,
   GameStatus,
@@ -46,6 +44,8 @@ interface RequestOptions {
   body?: unknown;
   requiresAuth?: boolean;
   bearerToken?: string;
+  suppressGlobalHandler?: boolean;
+  suppressUi?: boolean;
 }
 
 interface CacheConfig {
@@ -59,104 +59,27 @@ export interface ShipNavActionResult {
 
 @Injectable({ providedIn: 'root' })
 export class SpaceTradersApiService {
-  private readonly http = inject(HttpClient);
   private readonly config = inject(SPACETRADERS_CONFIG);
-  private readonly cache = inject(CacheService);
-  private readonly rateLimiter = inject(RateLimiterService);
-  private readonly tokenStorage = inject(TokenStorageService);
+  private readonly api = inject(ApiRequestService);
+  private readonly agentApi = inject(AgentApiService);
 
   private async request<T>(
     endpoint: string,
     options: RequestOptions = {},
     cacheConfig: CacheConfig | null = null,
   ): Promise<T> {
-    const { method = 'GET', body = null, requiresAuth = true, bearerToken } = options;
-
-    if (method === 'GET' && cacheConfig) {
-      const cacheKey = this.cache.generateKey(cacheConfig.category, endpoint, JSON.stringify(body ?? ''));
-      const cached = this.cache.get<T>(cacheKey);
-      if (cached) return cached;
-    }
-
-    const token = bearerToken ?? (requiresAuth ? this.tokenStorage.getToken() : null);
-    if (requiresAuth && !token) {
-      throw new Error('Authentication required. Please login first.');
-    }
-
-    const result = await this.rateLimiter.enqueue(async () => {
-      return this.withRetry(async () => {
-        const headers: Record<string, string> = {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        };
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        const needsBody = ['POST', 'PATCH', 'PUT'].includes(method);
-        const url = `${this.config.host}${endpoint}`;
-
-        try {
-          const response = await firstValueFrom(
-            this.http.request<T>(method, url, {
-              headers,
-              body: body ? body : needsBody ? {} : undefined,
-              observe: 'body',
-            }),
-          );
-          return response as T;
-        } catch (error) {
-          if (error instanceof HttpErrorResponse) {
-            const message = error.error?.error?.message ?? `HTTP ${error.status}`;
-            const err = new Error(message) as Error & { status?: number };
-            err.status = error.status;
-            throw err;
-          }
-          throw error;
-        }
-      });
+    return this.api.request<T>(endpoint, {
+      ...options,
+      cache: cacheConfig ?? undefined,
     });
-
-    if (method === 'GET' && cacheConfig) {
-      const cacheKey = this.cache.generateKey(cacheConfig.category, endpoint, JSON.stringify(body ?? ''));
-      this.cache.set(cacheKey, result, cacheConfig.category);
-    }
-
-    return result;
-  }
-
-  private async withRetry<T>(operation: () => Promise<T>): Promise<T> {
-    const { maxRetries, baseDelay, maxDelay, retryableStatuses } = this.config.retry;
-    let lastError: Error & { status?: number } | null = null;
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        return await operation();
-      } catch (error) {
-        lastError = error as Error & { status?: number };
-        const status = lastError.status;
-        const isRetryable = status && retryableStatuses.includes(status);
-        if (!isRetryable || attempt === maxRetries) throw lastError;
-        const delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
-        await new Promise((r) => setTimeout(r, delay));
-      }
-    }
-
-    throw lastError;
   }
 
   async getAgent() {
-    const response = await this.request<ApiResponse<AgentData>>('/my/agent', {}, { category: 'agent' });
-    const token = this.tokenStorage.getToken() ?? '';
-    return mapAgent(response.data, token);
+    return this.agentApi.getAgent();
   }
 
   async register(symbol: string, faction: string, accountToken: string) {
-    const response = await this.request<ApiResponse<{ agent: AgentData; token: string }>>(
-      '/register',
-      { method: 'POST', body: { symbol, faction }, requiresAuth: false, bearerToken: accountToken },
-    );
-    return mapAgent(response.data.agent, response.data.token);
+    return this.agentApi.register(symbol, faction, accountToken);
   }
 
   async getFactions(page = 1, limit = 20) {
@@ -217,13 +140,13 @@ export class SpaceTradersApiService {
   }
 
   async acceptContract(contractId: string) {
-    this.cache.invalidate('contracts');
-    this.cache.invalidate('agent');
+    this.api.invalidate('contracts');
+    this.api.invalidate('agent');
     return this.request(`/my/contracts/${contractId}/accept`, { method: 'POST' });
   }
 
   async negotiateContract(shipSymbol: string) {
-    this.cache.invalidate('contracts');
+    this.api.invalidate('contracts');
     const response = await this.request<ApiResponse<ContractData>>(
       `/my/ships/${shipSymbol}/negotiate/contract`,
       { method: 'POST' },
@@ -350,7 +273,7 @@ export class SpaceTradersApiService {
     tradeSymbol: string,
     units: number,
   ) {
-    this.cache.invalidate('waypoints');
+    this.api.invalidate('waypoints');
     return this.request<ApiResponse<{ construction: ConstructionData; cargo: unknown }>>(
       `/systems/${systemSymbol}/waypoints/${waypointSymbol}/construction/supply`,
       { method: 'POST', body: { shipSymbol, tradeSymbol, units } },
@@ -358,7 +281,7 @@ export class SpaceTradersApiService {
   }
 
   async navigateShip(shipSymbol: string, waypointSymbol: string) {
-    this.cache.invalidate('ships');
+    this.api.invalidate('ships');
     return this.request<ApiResponse<ShipNavActionResult>>(
       `/my/ships/${shipSymbol}/navigate`,
       { method: 'POST', body: { waypointSymbol } },
@@ -366,7 +289,7 @@ export class SpaceTradersApiService {
   }
 
   async orbitShip(shipSymbol: string, waypointSymbol?: string) {
-    this.cache.invalidate('ships');
+    this.api.invalidate('ships');
     const body = waypointSymbol ? { orbit: { waypointSymbol } } : {};
     return this.request<ApiResponse<{ nav: ShipData['nav'] }>>(
       `/my/ships/${shipSymbol}/orbit`,
@@ -375,7 +298,7 @@ export class SpaceTradersApiService {
   }
 
   async dockShip(shipSymbol: string) {
-    this.cache.invalidate('ships');
+    this.api.invalidate('ships');
     return this.request<ApiResponse<{ nav: ShipData['nav'] }>>(
       `/my/ships/${shipSymbol}/dock`,
       { method: 'POST' },
@@ -383,7 +306,7 @@ export class SpaceTradersApiService {
   }
 
   async warpShip(shipSymbol: string, waypointSymbol: string) {
-    this.cache.invalidate('ships');
+    this.api.invalidate('ships');
     return this.request<ApiResponse<ShipNavActionResult>>(
       `/my/ships/${shipSymbol}/warp`,
       { method: 'POST', body: { waypointSymbol } },
@@ -391,7 +314,7 @@ export class SpaceTradersApiService {
   }
 
   async jumpShip(shipSymbol: string, waypointSymbol: string) {
-    this.cache.invalidate('ships');
+    this.api.invalidate('ships');
     return this.request<ApiResponse<ShipNavActionResult>>(
       `/my/ships/${shipSymbol}/jump`,
       { method: 'POST', body: { waypointSymbol } },
@@ -399,8 +322,8 @@ export class SpaceTradersApiService {
   }
 
   async refuelShip(shipSymbol: string, units: number, fromShipSymbol?: string) {
-    this.cache.invalidate('ships');
-    this.cache.invalidate('agent');
+    this.api.invalidate('ships');
+    this.api.invalidate('agent');
     const body: { units: number; fromShipSymbol?: string } = { units };
     if (fromShipSymbol) body.fromShipSymbol = fromShipSymbol;
     return this.request<ApiResponse<{ agent: AgentData; fuel: ShipData['fuel']; transaction?: MarketTransaction }>>(
@@ -410,7 +333,7 @@ export class SpaceTradersApiService {
   }
 
   async extractResources(shipSymbol: string) {
-    this.cache.invalidate('ships');
+    this.api.invalidate('ships');
     return this.request<ApiResponse<ExtractionResult>>(
       `/my/ships/${shipSymbol}/extract`,
       { method: 'POST' },
@@ -418,7 +341,7 @@ export class SpaceTradersApiService {
   }
 
   async siphonResources(shipSymbol: string) {
-    this.cache.invalidate('ships');
+    this.api.invalidate('ships');
     return this.request<ApiResponse<SiphonResult>>(
       `/my/ships/${shipSymbol}/siphon`,
       { method: 'POST' },
@@ -426,7 +349,7 @@ export class SpaceTradersApiService {
   }
 
   async surveyWaypoint(shipSymbol: string) {
-    this.cache.invalidate('waypoints');
+    this.api.invalidate('waypoints');
     return this.request<ApiResponse<{ surveys: unknown[]; cooldown: unknown }>>(
       `/my/ships/${shipSymbol}/survey`,
       { method: 'POST' },
@@ -434,9 +357,9 @@ export class SpaceTradersApiService {
   }
 
   async purchaseCargo(shipSymbol: string, symbol: string, units: number) {
-    this.cache.invalidate('ships');
-    this.cache.invalidate('agent');
-    this.cache.invalidate('markets');
+    this.api.invalidate('ships');
+    this.api.invalidate('agent');
+    this.api.invalidate('markets');
     return this.request<ApiResponse<{ agent: AgentData; cargo: ShipCargo; transaction: MarketTransaction }>>(
       `/my/ships/${shipSymbol}/purchase`,
       { method: 'POST', body: { symbol, units } },
@@ -444,9 +367,9 @@ export class SpaceTradersApiService {
   }
 
   async sellCargo(shipSymbol: string, symbol: string, units: number) {
-    this.cache.invalidate('ships');
-    this.cache.invalidate('agent');
-    this.cache.invalidate('markets');
+    this.api.invalidate('ships');
+    this.api.invalidate('agent');
+    this.api.invalidate('markets');
     return this.request<ApiResponse<{ agent: AgentData; cargo: ShipCargo; transaction: MarketTransaction }>>(
       `/my/ships/${shipSymbol}/sell`,
       { method: 'POST', body: { symbol, units } },
@@ -454,8 +377,8 @@ export class SpaceTradersApiService {
   }
 
   async purchaseShipAtShipyard(shipSymbol: string, shipType: string, waypointSymbol: string) {
-    this.cache.invalidate('ships');
-    this.cache.invalidate('agent');
+    this.api.invalidate('ships');
+    this.api.invalidate('agent');
     return this.request<ApiResponse<{ agent: AgentData; ship: ShipData }>>(
       `/my/ships/${shipSymbol}/purchase/ship`,
       { method: 'POST', body: { shipType, waypointSymbol } },
@@ -463,8 +386,8 @@ export class SpaceTradersApiService {
   }
 
   async patchShip(shipSymbol: string) {
-    this.cache.invalidate('ships');
-    this.cache.invalidate('agent');
+    this.api.invalidate('ships');
+    this.api.invalidate('agent');
     return this.request<ApiResponse<{ agent: AgentData; ship: ShipData }>>(
       `/my/ships/${shipSymbol}/patch`,
       { method: 'POST' },
@@ -472,7 +395,7 @@ export class SpaceTradersApiService {
   }
 
   async jettisonCargo(shipSymbol: string, symbol: string, units: number) {
-    this.cache.invalidate('ships');
+    this.api.invalidate('ships');
     return this.request<ApiResponse<{ cargo: ShipCargo }>>(
       `/my/ships/${shipSymbol}/jettison`,
       { method: 'POST', body: { symbol, units } },
@@ -480,8 +403,8 @@ export class SpaceTradersApiService {
   }
 
   async chartWaypoint(shipSymbol: string) {
-    this.cache.invalidate('waypoints');
-    this.cache.invalidate('agent');
+    this.api.invalidate('waypoints');
+    this.api.invalidate('agent');
     return this.request<ApiResponse<{ chart: unknown; waypoint: WaypointData; agent: AgentData }>>(
       `/my/ships/${shipSymbol}/chart`,
       { method: 'POST' },
@@ -489,7 +412,7 @@ export class SpaceTradersApiService {
   }
 
   async scanSystems(shipSymbol: string) {
-    this.cache.invalidate('systems');
+    this.api.invalidate('systems');
     return this.request<ApiResponse<{ cooldown: unknown; systems: SystemData[] }>>(
       `/my/ships/${shipSymbol}/scan/systems`,
       { method: 'POST' },
@@ -497,7 +420,7 @@ export class SpaceTradersApiService {
   }
 
   async scanWaypoints(shipSymbol: string) {
-    this.cache.invalidate('waypoints');
+    this.api.invalidate('waypoints');
     return this.request<ApiResponse<{ cooldown: unknown; waypoints: ScannedWaypoint[] }>>(
       `/my/ships/${shipSymbol}/scan/waypoints`,
       { method: 'POST' },
@@ -505,7 +428,7 @@ export class SpaceTradersApiService {
   }
 
   async scanSurface(shipSymbol: string) {
-    this.cache.invalidate('waypoints');
+    this.api.invalidate('waypoints');
     return this.request<ApiResponse<{ cooldown: unknown; deposits: unknown[] }>>(
       `/my/ships/${shipSymbol}/scan/surface`,
       { method: 'POST' },
@@ -548,8 +471,8 @@ export class SpaceTradersApiService {
     tradeSymbol: string,
     units: number,
   ) {
-    this.cache.invalidate('contracts');
-    this.cache.invalidate('ships');
+    this.api.invalidate('contracts');
+    this.api.invalidate('ships');
     return this.request<ApiResponse<{ contract: ContractData }>>(
       `/my/contracts/${encodeURIComponent(contractId)}/deliver`,
       { method: 'POST', body: { shipSymbol, tradeSymbol, units } },
@@ -557,8 +480,8 @@ export class SpaceTradersApiService {
   }
 
   async fulfillContract(contractId: string) {
-    this.cache.invalidate('contracts');
-    this.cache.invalidate('agent');
+    this.api.invalidate('contracts');
+    this.api.invalidate('agent');
     const response = await this.request<ApiResponse<{ contract: ContractData; agent: AgentData }>>(
       `/my/contracts/${encodeURIComponent(contractId)}/fulfill`,
       { method: 'POST' },
@@ -567,8 +490,8 @@ export class SpaceTradersApiService {
   }
 
   async purchaseShip(shipType: string, waypointSymbol: string) {
-    this.cache.invalidate('ships');
-    this.cache.invalidate('agent');
+    this.api.invalidate('ships');
+    this.api.invalidate('agent');
     return this.request<ApiResponse<{ agent: AgentData; ship: ShipData }>>(
       '/my/ships',
       { method: 'POST', body: { shipType, waypointSymbol } },
@@ -576,7 +499,7 @@ export class SpaceTradersApiService {
   }
 
   async refineShip(shipSymbol: string, produce: string) {
-    this.cache.invalidate('ships');
+    this.api.invalidate('ships');
     return this.request<ApiResponse<{ cargo: ShipCargo }>>(
       `/my/ships/${encodeURIComponent(shipSymbol)}/refine`,
       { method: 'POST', body: { produce } },
@@ -598,7 +521,7 @@ export class SpaceTradersApiService {
   }
 
   async patchShipNav(shipSymbol: string, flightMode: ShipNavFlightMode) {
-    this.cache.invalidate('ships');
+    this.api.invalidate('ships');
     return this.request<ApiResponse<{ nav: ShipNav; fuel: ShipData['fuel'] }>>(
       `/my/ships/${encodeURIComponent(shipSymbol)}/nav`,
       { method: 'PATCH', body: { flightMode } },
@@ -606,7 +529,7 @@ export class SpaceTradersApiService {
   }
 
   async extractWithSurvey(shipSymbol: string, survey: unknown) {
-    this.cache.invalidate('ships');
+    this.api.invalidate('ships');
     return this.request<ApiResponse<ExtractionResult>>(
       `/my/ships/${encodeURIComponent(shipSymbol)}/extract/survey`,
       { method: 'POST', body: survey },
@@ -626,7 +549,7 @@ export class SpaceTradersApiService {
     tradeSymbol: string,
     units: number,
   ) {
-    this.cache.invalidate('ships');
+    this.api.invalidate('ships');
     return this.request<ApiResponse<{ cargo: ShipCargo }>>(
       `/my/ships/${encodeURIComponent(fromShipSymbol)}/transfer`,
       { method: 'POST', body: { shipSymbol: toShipSymbol, tradeSymbol, units } },
@@ -641,8 +564,8 @@ export class SpaceTradersApiService {
   }
 
   async installMount(shipSymbol: string, symbol: string) {
-    this.cache.invalidate('ships');
-    this.cache.invalidate('agent');
+    this.api.invalidate('ships');
+    this.api.invalidate('agent');
     return this.request<ApiResponse<{ agent: AgentData; mounts: ShipMount[]; cargo: ShipCargo }>>(
       `/my/ships/${encodeURIComponent(shipSymbol)}/mounts/install`,
       { method: 'POST', body: { symbol } },
@@ -650,7 +573,7 @@ export class SpaceTradersApiService {
   }
 
   async removeMount(shipSymbol: string, symbol: string) {
-    this.cache.invalidate('ships');
+    this.api.invalidate('ships');
     return this.request<ApiResponse<{ cargo: ShipCargo }>>(
       `/my/ships/${encodeURIComponent(shipSymbol)}/mounts/remove`,
       { method: 'POST', body: { symbol } },
@@ -665,8 +588,8 @@ export class SpaceTradersApiService {
   }
 
   async repairShip(shipSymbol: string) {
-    this.cache.invalidate('ships');
-    this.cache.invalidate('agent');
+    this.api.invalidate('ships');
+    this.api.invalidate('agent');
     return this.request<ApiResponse<{ agent: AgentData; ship: ShipData }>>(
       `/my/ships/${encodeURIComponent(shipSymbol)}/repair`,
       { method: 'POST' },
@@ -681,8 +604,8 @@ export class SpaceTradersApiService {
   }
 
   async scrapShip(shipSymbol: string) {
-    this.cache.invalidate('ships');
-    this.cache.invalidate('agent');
+    this.api.invalidate('ships');
+    this.api.invalidate('agent');
     return this.request<ApiResponse<{ agent: AgentData }>>(
       `/my/ships/${encodeURIComponent(shipSymbol)}/scrap`,
       { method: 'POST' },
@@ -697,8 +620,8 @@ export class SpaceTradersApiService {
   }
 
   async installShipModule(shipSymbol: string, symbol: string) {
-    this.cache.invalidate('ships');
-    this.cache.invalidate('agent');
+    this.api.invalidate('ships');
+    this.api.invalidate('agent');
     return this.request<ApiResponse<{ agent: AgentData; modules: ShipModule[]; cargo: ShipCargo }>>(
       `/my/ships/${encodeURIComponent(shipSymbol)}/modules/install`,
       { method: 'POST', body: { symbol } },
@@ -706,7 +629,7 @@ export class SpaceTradersApiService {
   }
 
   async removeShipModule(shipSymbol: string, symbol: string) {
-    this.cache.invalidate('ships');
+    this.api.invalidate('ships');
     return this.request<ApiResponse<{ cargo: ShipCargo }>>(
       `/my/ships/${encodeURIComponent(shipSymbol)}/modules/remove`,
       { method: 'POST', body: { symbol } },
@@ -729,16 +652,16 @@ export class SpaceTradersApiService {
   }
 
   private invalidateForMutation(path: string): void {
-    if (path.includes('/ships')) this.cache.invalidate('ships');
-    if (path.includes('/contracts')) this.cache.invalidate('contracts');
+    if (path.includes('/ships')) this.api.invalidate('ships');
+    if (path.includes('/contracts')) this.api.invalidate('contracts');
     if (path.includes('/agent') || path.includes('/purchase') || path.includes('/repair') || path.includes('/scrap')) {
-      this.cache.invalidate('agent');
+      this.api.invalidate('agent');
     }
     if (path.includes('/waypoints') || path.includes('/chart') || path.includes('/survey') || path.includes('/scan')) {
-      this.cache.invalidate('waypoints');
+      this.api.invalidate('waypoints');
     }
-    if (path.includes('/systems')) this.cache.invalidate('systems');
-    if (path.includes('/market')) this.cache.invalidate('markets');
+    if (path.includes('/systems')) this.api.invalidate('systems');
+    if (path.includes('/market')) this.api.invalidate('markets');
   }
 
   async callEndpoint(endpoint: ApiEndpointMeta, options: CallEndpointOptions = {}): Promise<CallEndpointResult> {
@@ -763,10 +686,11 @@ export class SpaceTradersApiService {
         method,
         body: needsBody ? (options.body ?? {}) : undefined,
         requiresAuth: endpoint.requiresAuth,
+        suppressGlobalHandler: true,
       });
       return { data, status: 200, durationMs: Math.round(performance.now() - started) };
     } catch (error) {
-      const err = error as Error & { status?: number };
+      const err = error instanceof SpaceTradersApiError ? error : new SpaceTradersApiError(String(error));
       return {
         data: { error: err.message },
         status: err.status ?? 0,
@@ -776,7 +700,6 @@ export class SpaceTradersApiService {
   }
 
   clearCaches(): void {
-    this.cache.clear();
-    this.rateLimiter.clearQueue();
+    this.api.clearCaches();
   }
 }

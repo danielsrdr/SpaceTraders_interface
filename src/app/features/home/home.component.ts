@@ -1,4 +1,4 @@
-import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { AgentStore } from '../../core/state/agent.store';
 import { AnalyticsStore } from '../../core/state/analytics.store';
@@ -32,6 +32,7 @@ export interface RecommendedAction {
   selector: 'app-home',
   imports: [FleetMiniMapComponent],
   templateUrl: './home.component.html',
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class HomeComponent implements OnInit, OnDestroy {
   private readonly api = inject(SpaceTradersApiService);

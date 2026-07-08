@@ -22,11 +22,16 @@ export function gravitationalAcceleration(
   target.set(0, 0, 0);
   for (const src of sources) {
     scratch.subVectors(pos, src.position);
+    const distSq = scratch.lengthSq();
     const soft = src.softening ?? GRAVITY_SOFTENING_KM;
-    const r2 = scratch.lengthSq() + soft * soft;
+    const r2 = distSq + soft * soft;
     const r = Math.sqrt(r2);
-    if (r < 1e-6) continue;
     const accel = src.mu / r2;
+    if (distSq < 1e-12) {
+      // At a source centre the direction is undefined; softening still yields finite magnitude.
+      target.y -= accel;
+      continue;
+    }
     target.addScaledVector(scratch, -accel / r);
   }
   return target;

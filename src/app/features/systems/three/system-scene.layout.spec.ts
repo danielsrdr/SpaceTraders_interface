@@ -1,4 +1,5 @@
 import { PlanetView } from '../../../models/system.model';
+import { getSimRadiusKm } from './celestial-mass';
 import {
   apiRelativeOffset,
   computeSystemLayout3d,
@@ -42,13 +43,17 @@ describe('computeSystemLayout3d', () => {
 
 describe('getPlanetRadius3d', () => {
   it('maps known waypoint types to render radii derived from sim km', () => {
-    expect(getPlanetRadius3d(makePlanet('p', 0, 0, 'PLANET'))).toBeCloseTo(6_000 / RENDER_KM_PER_UNIT, 6);
-    expect(getPlanetRadius3d(makePlanet('m', 0, 0, 'MOON'))).toBeCloseTo(1_500 / RENDER_KM_PER_UNIT, 6);
-    expect(getPlanetRadius3d(makePlanet('g', 0, 0, 'GAS_GIANT'))).toBeCloseTo(60_000 / RENDER_KM_PER_UNIT, 6);
+    const planet = makePlanet('p', 0, 0, 'PLANET');
+    const moon = makePlanet('m', 0, 0, 'MOON');
+    const giant = makePlanet('g', 0, 0, 'GAS_GIANT');
+    expect(getPlanetRadius3d(planet)).toBeCloseTo(getSimRadiusKm(planet) / RENDER_KM_PER_UNIT, 6);
+    expect(getPlanetRadius3d(moon)).toBeCloseTo(getSimRadiusKm(moon) / RENDER_KM_PER_UNIT, 6);
+    expect(getPlanetRadius3d(giant)).toBeCloseTo(getSimRadiusKm(giant) / RENDER_KM_PER_UNIT, 6);
   });
 
   it('falls back to a default radius for unknown types', () => {
-    expect(getPlanetRadius3d(makePlanet('x', 0, 0, 'MYSTERY_TYPE'))).toBeCloseTo(4_200 / RENDER_KM_PER_UNIT, 6);
+    const mystery = makePlanet('x', 0, 0, 'MYSTERY_TYPE');
+    expect(getPlanetRadius3d(mystery)).toBeCloseTo(getSimRadiusKm(mystery) / RENDER_KM_PER_UNIT, 6);
   });
 });
 

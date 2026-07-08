@@ -3,7 +3,7 @@ import {
   REF_HELIO_ORBIT_KM,
   REF_HELIO_PERIOD_SEC,
 } from './physics-units';
-import { displayMeanMotion, orbitPeriodSec } from './orbit-visual-scale';
+import { displayMeanMotion, displayMeanMotionUnclamped, orbitPeriodSec } from './orbit-visual-scale';
 
 describe('orbit-visual-scale', () => {
   it('calibrates heliocentric reference orbit to REF_HELIO_PERIOD_SEC', () => {
@@ -12,8 +12,8 @@ describe('orbit-visual-scale', () => {
   });
 
   it('keeps Kepler ratio: inner sun orbit faster than outer', () => {
-    const nInner = displayMeanMotion(80_000, STAR_MU);
-    const nOuter = displayMeanMotion(400_000, STAR_MU);
+    const nInner = displayMeanMotionUnclamped(80_000, STAR_MU);
+    const nOuter = displayMeanMotionUnclamped(400_000, STAR_MU);
     expect(nInner).toBeGreaterThan(nOuter);
     expect(nInner / nOuter).toBeCloseTo(Math.pow(400_000 / 80_000, 1.5), 3);
   });

@@ -1,5 +1,6 @@
 import {
   AfterViewInit,
+  ChangeDetectionStrategy,
   Component,
   computed,
   HostListener,
@@ -71,6 +72,7 @@ const FLIGHT_MODES: ShipNavFlightMode[] = ['DRIFT', 'STEALTH', 'CRUISE', 'BURN']
   ],
   templateUrl: './system-map.component.html',
   host: { class: 'block h-full min-h-0' },
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
   private readonly mapStore = inject(SystemMapStore);

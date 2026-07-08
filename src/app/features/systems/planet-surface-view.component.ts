@@ -86,38 +86,19 @@ import {
   type LaunchExhaustEffects,
 } from './three/surface-launch-effects';
 import { LaunchAnimation, type LaunchPhase } from './three/launch-animation';
+import { applyCameraShake, prefersReducedMotion } from './three/motion.util';
+import { projectPoiLabels, type SurfacePoiLabel } from './three/surface/surface-label-projector';
+import { computeDayNight, applyWeatherFogShrink } from './three/surface/surface-day-night.controller';
 import { ExoSuitHudComponent, type ExoPoiCompass } from './exo-suit-hud/exo-suit-hud.component';
 import { SurfaceMarketDialogComponent } from './surface-market-dialog.component';
 import { SurfacePostcardDialogComponent } from '../postcard/surface-postcard-dialog.component';
 import type { SurfacePostcardOptions } from '../postcard/surface-postcard-canvas';
 
 /** Seconds for one full surface day -> night -> day cycle. */
-const DAY_LENGTH_S = 150;
 
 const BASE_CAMERA_FOV = 70;
 
-const SKY_DAY = new Color(0xc7e4ff);
-const SKY_DUSK = new Color(0xe8915a);
-const SKY_NIGHT = new Color(0x0a1024);
 const FOG_DAY = new Color(0xe8c896);
-const FOG_DUSK = new Color(0xc4632f);
-const FOG_NIGHT = new Color(0x0a1228);
-const SUN_NOON = new Color(0xfff7ed);
-const SUN_DUSK = new Color(0xff9a4d);
-
-function smoothstep(edge0: number, edge1: number, x: number): number {
-  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-  return t * t * (3 - 2 * t);
-}
-
-export interface SurfacePoiLabel {
-  kind: SurfaceZoneKind;
-  label: string;
-  x: number;
-  y: number;
-  opacity: number;
-  inRange: boolean;
-}
 
 @Component({
   selector: 'app-planet-surface-view',
@@ -195,9 +176,6 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   private fps!: FpsControls;
 
   // Day/night cycle scratch + tagged emitters that brighten after dusk.
-  private readonly sunColorScratch = new Color();
-  private readonly skyScratch = new Color();
-  private readonly fogScratch = new Color();
   private nightLights: { light: PointLight; base: number }[] = [];
   private nightGlows: { mat: MeshStandardMaterial; base: number }[] = [];
   private world: SurfaceWorldResult | null = null;
@@ -334,7 +312,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
 
   private startEntry(): void {
     if (!this.entryActive()) return;
-    const reduced = this.prefersReducedMotion();
+    const reduced = prefersReducedMotion();
     this.entryProgress = 0;
     this.entrySeed = Math.random() * 1000;
     this.entryDuration = reduced ? 0.5 : 2;
@@ -351,7 +329,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     this.entryProgress = Math.min(1, this.entryProgress + delta / this.entryDuration);
     const eased = this.easeOut(this.entryProgress);
 
-    if (this.world && !this.prefersReducedMotion()) {
+    if (this.world && !prefersReducedMotion()) {
       this.camera.position.y = this.world.spawn.y + (1 - eased) * 5;
       const amp = (1 - this.entryProgress) * 0.5;
       const t = performance.now() * 0.05 + this.entrySeed;
@@ -463,33 +441,14 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     const world = this.world;
     if (!world || !world.poiAnchors.length) return [];
     const host = this.hostRef.nativeElement;
-    const w = host.clientWidth;
-    const h = host.clientHeight;
-    if (!w || !h) return [];
-
-    const labels: SurfacePoiLabel[] = [];
-    for (const anchor of world.poiAnchors) {
-      if (anchor.kind === 'market') continue;
-      this.projVec.copy(anchor.position).project(this.camera);
-      const onScreen =
-        this.projVec.z < 1 &&
-        this.projVec.x >= -1.1 &&
-        this.projVec.x <= 1.1 &&
-        this.projVec.y >= -1.1 &&
-        this.projVec.y <= 1.1;
-      if (!onScreen) continue;
-
-      const dist = this.camera.position.distanceTo(anchor.position);
-      labels.push({
-        kind: anchor.kind,
-        label: anchor.label,
-        x: (this.projVec.x * 0.5 + 0.5) * w,
-        y: (-this.projVec.y * 0.5 + 0.5) * h,
-        opacity: Math.max(0.45, Math.min(1, 1.3 - dist / 160)),
-        inRange: active?.kind === anchor.kind,
-      });
-    }
-    return labels;
+    return projectPoiLabels(
+      world.poiAnchors,
+      this.camera,
+      host.clientWidth,
+      host.clientHeight,
+      active?.kind ?? null,
+      this.projVec,
+    );
   }
 
   private easeOut(t: number): number {
@@ -498,13 +457,6 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
 
   private easeInOut(t: number): number {
     return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-  }
-
-  private prefersReducedMotion(): boolean {
-    return (
-      typeof window !== 'undefined' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    );
   }
 
   openStamp(): void {
@@ -569,7 +521,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     }
 
     this.launch.start({
-      reducedMotion: this.prefersReducedMotion(),
+      reducedMotion: prefersReducedMotion(),
       shipRole,
       stormActive: this.surfaceWeather.event() !== null,
     });
@@ -584,14 +536,6 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     this.launchEffects?.dispose();
     this.launchEffects = null;
     this.launchAudio.stop();
-  }
-
-  private applyLaunchCameraShake(amp: number): void {
-    if (amp <= 0 || this.prefersReducedMotion()) return;
-    const t = performance.now() * 0.05 + this.launchShakeSeed;
-    this.camera.position.x += Math.sin(t * 1.7) * amp;
-    this.camera.position.y += Math.cos(t * 2.3) * amp;
-    this.camera.position.z += Math.sin(t * 1.1) * amp;
   }
 
   private updateLaunch(delta: number): void {
@@ -645,7 +589,9 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
         );
       }
 
-      this.applyLaunchCameraShake(motion.shakeAmp);
+      if (motion.shakeAmp > 0 && !prefersReducedMotion()) {
+        applyCameraShake(this.camera.position, motion.shakeAmp, this.launchShakeSeed);
+      }
       this.camera.lookAt(ship.position.x, ship.position.y + 1.8 + climbT * 8, ship.position.z);
     } else {
       this.camera.position.y = this.launchShipBaseY + motion.yLift;
@@ -1461,16 +1407,14 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
 
   private updateSurfaceWeatherFog(): void {
     if (!(this.scene.fog instanceof Fog)) return;
-    const shrink = 1 - this.surfaceWeather.intensity * 0.45;
-    this.scene.fog.near = this.baseFogNear * shrink;
-    this.scene.fog.far = this.baseFogFar * shrink;
+    applyWeatherFogShrink(
+      this.scene.fog,
+      this.baseFogNear,
+      this.baseFogFar,
+      this.surfaceWeather.intensity,
+    );
   }
 
-  /**
-   * Sweeps the sun across the sky over {@link DAY_LENGTH_S}: shadows rotate with
-   * the light, sky/fog/ambient lerp through day -> dusk -> night, and tagged
-   * building lights ramp on after dusk. Gas giants keep their static atmosphere.
-   */
   private updateDayNight(elapsed: number): void {
     if (!this.world) return;
 
@@ -1479,47 +1423,25 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
       return;
     }
 
-    const angle = (elapsed / DAY_LENGTH_S) * Math.PI * 2;
-    const elevation = Math.sin(angle);
-    this.sun.position.set(Math.cos(angle) * 80, elevation * 90, 30);
-
-    const dayness = smoothstep(-0.08, 0.25, elevation); // 0 night -> 1 full day
-    const night = 1 - dayness;
-    this.world.tunnels?.setNightVeinBoost(elevation < 0.12);
-    // Warm tint while the sun rides low near the horizon.
-    const dusk = Math.max(0, 1 - Math.abs(elevation) / 0.22) * dayness;
-
-    this.sun.intensity = 0.04 + dayness * 1.5;
-    this.sun.color.copy(this.sunColorScratch.copy(SUN_NOON).lerp(SUN_DUSK, dusk));
-
-    if (this.scene.background instanceof Color) {
-      this.scene.background.copy(
-        this.skyScratch.copy(SKY_NIGHT).lerp(SKY_DAY, dayness).lerp(SKY_DUSK, dusk * 0.6),
-      );
-    }
-    if (this.scene.fog instanceof Fog) {
-      const profile = this.activeProfile;
-      const fogDay = profile ? new Color(profile.fogColor) : FOG_DAY;
-      this.scene.fog.color.copy(
-        this.fogScratch.copy(FOG_NIGHT).lerp(fogDay, dayness).lerp(FOG_DUSK, dusk * 0.6),
-      );
-      const weatherShrink = 1 - this.surfaceWeather.intensity * 0.45;
-      this.scene.fog.near = this.baseFogNear * weatherShrink;
-      this.scene.fog.far = (this.baseFogFar * (0.6 + dayness * 0.4)) * weatherShrink;
-    }
-
-    this.hemi.intensity = 0.12 + dayness * 0.45;
-    this.ambient.intensity = 0.05 + dayness * 0.14;
-
-    setTerrainSunDirection(
-      this.world.terrainManager.material,
-      this.sun.position.x,
-      this.sun.position.y,
-      this.sun.position.z,
+    const profile = this.activeProfile;
+    computeDayNight(
+      elapsed,
+      { sun: this.sun, hemi: this.hemi, ambient: this.ambient },
+      {
+        background: this.scene.background instanceof Color ? this.scene.background : null,
+        fog: this.scene.fog instanceof Fog ? this.scene.fog : null,
+      },
+      { nightLights: this.nightLights, nightGlows: this.nightGlows },
+      {
+        baseFogNear: this.baseFogNear,
+        baseFogFar: this.baseFogFar,
+        fogDayColor: profile ? new Color(profile.fogColor) : FOG_DAY,
+        weatherIntensity: this.surfaceWeather.intensity,
+      },
+      (x, y, z) =>
+        setTerrainSunDirection(this.world!.terrainManager.material, x, y, z),
+      (boost) => this.world!.tunnels?.setNightVeinBoost(boost),
     );
-
-    for (const nl of this.nightLights) nl.light.intensity = nl.base * night;
-    for (const ng of this.nightGlows) ng.mat.emissiveIntensity = ng.base * (0.4 + 0.9 * night);
   }
 
   private startRenderLoop(): void {

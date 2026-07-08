@@ -1,59 +1,73 @@
 # Skamkraft
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.0.2.
+Web interface for [SpaceTraders](https://spacetraders.io/) — manage your fleet, explore systems in 3D, trade, mine, and run contracts from a single Angular app.
 
-## Development server
+## Prerequisites
 
-To start a local development server, run:
+- Node.js 22+
+- npm 11+
+- A [SpaceTraders](https://spacetraders.io/) account and agent token
 
-```bash
-ng serve
-```
-
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
-
-## Code scaffolding
-
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+## Getting started
 
 ```bash
-ng generate component component-name
+npm install
+npm start
 ```
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+Open [http://localhost:4200](http://localhost:4200).
+
+## SpaceTraders token
+
+1. Create an agent at [spacetraders.io](https://spacetraders.io/) (use the quickstart link on the login screen).
+2. Copy your **agent token** from the quickstart response.
+3. Paste it on the **Login** screen. Enable **Remember me** to persist the token in `localStorage`; otherwise it is kept for the browser session only.
+
+To register a new agent from the app, go to **Register** and provide your **account token** (from the SpaceTraders account page), an agent name, and a recruiting faction.
+
+Tokens are stored locally in the browser and sent as `Authorization: Bearer` headers to `https://api.spacetraders.io/v2`. They are never committed to the repository.
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| `npm start` | Dev server (`ng serve`) |
+| `npm test` | Unit tests via Angular CLI |
+| `npm run test:ci` | Unit tests via Vitest (used in CI) |
+| `npm run build` | Production build |
+| `npm run format` | Format all files with Prettier |
+| `npm run format:check` | Check formatting without writing |
+| `npm run mcp:install` | Install the SpaceTraders MCP server dependencies |
+| `npm run mcp:build` | Build the MCP server |
+| `npm run generate:api-endpoints` | Regenerate API endpoint metadata from the OpenAPI spec |
+
+## MCP server (optional)
+
+The `mcp/spacetraders-server` package exposes SpaceTraders API tools for Cursor and other MCP clients. After `npm run mcp:install`, set `SPACETRADERS_TOKEN` in the MCP server environment to authenticate API calls.
+
+## CI
+
+GitHub Actions runs `npm ci` and `npx vitest run` on every push and pull request (see [`.github/workflows/test.yml`](.github/workflows/test.yml)).
+
+Run the same checks locally:
 
 ```bash
-ng generate --help
+npm run test:ci
 ```
 
-## Building
+## Deploy on Render
 
-To build the project run:
+Skamkraft is a static Angular SPA. Deploy it as a **Static Site** on [Render](https://render.com/):
 
-```bash
-ng build
-```
+| Setting | Value |
+|---------|-------|
+| Build command | `npm ci && npm run build` |
+| Publish directory | `dist/skamkraft/browser` |
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+Add a **Rewrite rule** so client-side routing works:
 
-## Running unit tests
+| Source | Destination |
+|--------|-------------|
+| `/*` | `/index.html` |
 
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
-
-```bash
-ng test
-```
-
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+No server-side environment variables are required for the frontend — users authenticate with their own SpaceTraders token in the browser.

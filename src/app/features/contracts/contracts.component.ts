@@ -1,4 +1,4 @@
-import { Component, inject, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { LogbookStore } from '../../core/state/logbook.store';
@@ -24,6 +24,7 @@ type DeliveryTerm = ContractTerms['deliver'][number];
   selector: 'app-contracts',
   imports: [FormsModule, GoodIconComponent, ContractMiniMapComponent, MissionDirectorPanelComponent],
   templateUrl: './contracts.component.html',
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ContractsComponent implements OnInit {
   private readonly api = inject(SpaceTradersApiService);
