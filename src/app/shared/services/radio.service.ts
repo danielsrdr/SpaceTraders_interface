@@ -1,5 +1,6 @@
 import { effect, inject, Injectable, signal } from '@angular/core';
 import { LogbookStore, LogCategory, LogEntry } from '../../core/state/logbook.store';
+import { createAudioContext, readMutedFlag } from '../utils/audio-context.util';
 
 const MUTE_KEY = 'sk_radio_muted';
 /** Only announce log entries fresher than this (skips history hydration). */
@@ -202,25 +203,11 @@ export class RadioService {
   }
 
   private ensureContext(): AudioContext | null {
-    if (this.ctx) return this.ctx;
-    if (typeof window === 'undefined') return null;
-    try {
-      const Ctor =
-        window.AudioContext ??
-        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!Ctor) return null;
-      this.ctx = new Ctor();
-      return this.ctx;
-    } catch {
-      return null;
-    }
+    this.ctx ??= createAudioContext();
+    return this.ctx;
   }
 
   private readMuted(): boolean {
-    try {
-      return localStorage.getItem(MUTE_KEY) === '1';
-    } catch {
-      return false;
-    }
+    return readMutedFlag(MUTE_KEY);
   }
 }

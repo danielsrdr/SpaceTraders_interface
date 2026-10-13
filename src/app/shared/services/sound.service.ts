@@ -1,4 +1,5 @@
 import { Injectable, signal } from '@angular/core';
+import { createAudioContext, readMutedFlag } from '../utils/audio-context.util';
 
 const MUTE_KEY = 'sk_sound_muted';
 
@@ -76,24 +77,11 @@ export class SoundService {
   }
 
   private ensureContext(): AudioContext | null {
-    if (this.ctx) return this.ctx;
-    try {
-      const Ctor =
-        window.AudioContext ??
-        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!Ctor) return null;
-      this.ctx = new Ctor();
-      return this.ctx;
-    } catch {
-      return null;
-    }
+    this.ctx ??= createAudioContext();
+    return this.ctx;
   }
 
   private readMuted(): boolean {
-    try {
-      return localStorage.getItem(MUTE_KEY) === '1';
-    } catch {
-      return false;
-    }
+    return readMutedFlag(MUTE_KEY);
   }
 }

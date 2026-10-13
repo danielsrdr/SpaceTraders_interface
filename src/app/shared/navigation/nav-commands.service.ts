@@ -69,9 +69,6 @@ export class NavCommandsService {
   private readonly logbookDrawer = inject(LogbookDrawerService);
   private readonly router = inject(Router);
 
-  readonly factionsUnlockHint = FACTIONS_UNLOCK_HINT;
-  readonly dataUnlockHint = DATA_UNLOCK_HINT;
-
   readonly items = computed<NavItemView[]>(() => {
     const dataLocked = !this.discovery.dataUnlocked();
     const factionsLocked = !this.discovery.factionsUnlocked();
@@ -84,14 +81,66 @@ export class NavCommandsService {
     const autopilotActive = this.orderQueue.activeShips().length;
 
     return [
-      this.nav('home', 'Command Center', 'home', '/home', 'ops', ['start', 'welcome', 'command', 'hub']),
+      this.nav('home', 'Command Center', 'home', '/home', 'ops', [
+        'start',
+        'welcome',
+        'command',
+        'hub',
+      ]),
       this.nav('dashboard', 'Dashboard', 'dashboard', '/dashboard', 'ops', ['stats', 'overview']),
-      this.nav('systems', 'Systems', 'systems', undefined, 'ops', ['map', 'flight', 'galaxy'], 'systems'),
-      this.nav('ships', 'Ships', 'ships', '/ships', 'ops', ['fleet', 'vessels'], undefined, shipArrived, 'good', inTransit, 'neutral'),
-      this.nav('autopilot', 'Auto-pilot', 'autopilot', '/autopilot', 'ops', ['automation', 'queue', 'orders'], undefined, false, undefined, autopilotActive, 'good'),
-      this.nav('contracts', 'Contracts', 'contracts', '/contracts', 'economy', ['missions', 'jobs'], undefined, contractExpiring, 'warn', openContracts, contractExpiring ? 'warn' : 'neutral'),
+      this.nav(
+        'systems',
+        'Systems',
+        'systems',
+        undefined,
+        'ops',
+        ['map', 'flight', 'galaxy'],
+        'systems',
+      ),
+      this.nav(
+        'ships',
+        'Ships',
+        'ships',
+        '/ships',
+        'ops',
+        ['fleet', 'vessels'],
+        undefined,
+        shipArrived,
+        'good',
+        inTransit,
+        'neutral',
+      ),
+      this.nav(
+        'autopilot',
+        'Auto-pilot',
+        'autopilot',
+        '/autopilot',
+        'ops',
+        ['automation', 'queue', 'orders'],
+        undefined,
+        false,
+        undefined,
+        autopilotActive,
+        'good',
+      ),
+      this.nav(
+        'contracts',
+        'Contracts',
+        'contracts',
+        '/contracts',
+        'economy',
+        ['missions', 'jobs'],
+        undefined,
+        contractExpiring,
+        'warn',
+        openContracts,
+        contractExpiring ? 'warn' : 'neutral',
+      ),
       {
-        ...this.nav('factions', 'Factions', 'factions', '/factions', 'economy', ['diplomacy', 'registry']),
+        ...this.nav('factions', 'Factions', 'factions', '/factions', 'economy', [
+          'diplomacy',
+          'registry',
+        ]),
         locked: factionsLocked,
         unlockHint: FACTIONS_UNLOCK_HINT,
       },
@@ -100,12 +149,34 @@ export class NavCommandsService {
         locked: dataLocked,
         unlockHint: DATA_UNLOCK_HINT,
       },
-      this.nav('codex', 'Codex', 'codex', '/codex', 'exploration', ['encyclopedia', 'achievements']),
-      this.nav('logbook', 'Logbook', 'codex', '/logbook', 'exploration', ['log', 'history', 'journal']),
-      this.nav('leaderboard', 'Leaderboard', 'leaderboard', '/leaderboard', 'exploration', ['rankings', 'scores']),
-      this.nav('profile', 'Profile', 'profile', '/profile', 'meta', ['agent', 'settings', 'account']),
+      this.nav('codex', 'Codex', 'codex', '/codex', 'exploration', [
+        'encyclopedia',
+        'achievements',
+      ]),
+      this.nav('logbook', 'Logbook', 'codex', '/logbook', 'exploration', [
+        'log',
+        'history',
+        'journal',
+      ]),
+      this.nav('leaderboard', 'Leaderboard', 'leaderboard', '/leaderboard', 'exploration', [
+        'rankings',
+        'scores',
+      ]),
+      this.nav('profile', 'Profile', 'profile', '/profile', 'meta', [
+        'agent',
+        'settings',
+        'account',
+      ]),
       this.nav('api', 'API', 'api', '/api', 'meta', ['explorer', 'endpoints', 'developer']),
-      this.nav('logbook-drawer', 'Open log drawer', 'codex', undefined, 'meta', ['log', 'drawer', 'quick'], 'logbook-drawer'),
+      this.nav(
+        'logbook-drawer',
+        'Open log drawer',
+        'codex',
+        undefined,
+        'meta',
+        ['log', 'drawer', 'quick'],
+        'logbook-drawer',
+      ),
       this.nav('logout', 'Logout', 'logout', undefined, 'meta', ['sign out', 'exit'], 'logout'),
     ];
   });
@@ -126,10 +197,9 @@ export class NavCommandsService {
 
   search(query: string, extra: PaletteCommand[] = []): PaletteCommand[] {
     const q = query.trim().toLowerCase();
-    const all = [...this.navPaletteCommands(), ...extra];
-    if (!q) return all.filter((c) => c.id !== 'logbook-drawer');
+    const all = [...this.navPaletteCommands(), ...extra].filter((c) => c.id !== 'logbook-drawer');
+    if (!q) return all;
     return all.filter((cmd) => {
-      if (cmd.id === 'logbook-drawer') return false;
       const haystack = [cmd.label, cmd.hint ?? '', ...cmd.keywords].join(' ').toLowerCase();
       return haystack.includes(q);
     });
