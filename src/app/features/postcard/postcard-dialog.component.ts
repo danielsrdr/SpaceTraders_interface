@@ -2,14 +2,12 @@ import { Component, effect, inject, input, output, signal } from '@angular/core'
 import { SnackbarService } from '../../shared/services/snackbar.service';
 import { PostcardOptions, renderPostcard } from './postcard-canvas';
 
-interface ShareCapableNavigator {
-  share?: (data: { files?: File[]; title?: string; text?: string }) => Promise<void>;
-  canShare?: (data: { files?: File[] }) => boolean;
-}
-
-function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
-  return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), 'image/png'));
-}
+import {
+  ShareCapableNavigator,
+  canvasToBlob,
+  computeCanShareFiles,
+  sanitizeFilenamePart,
+} from './postcard-share.util';
 
 /**
  * Preview + export modal for a generated system postcard. Renders the stylized
@@ -57,27 +55,14 @@ export class PostcardDialogComponent {
       const canvas = renderPostcard(opts);
       this.dataUrl.set(canvas.toDataURL('image/png'));
       this.blob = await canvasToBlob(canvas);
-      this.canShareFiles.set(this.computeCanShareFiles());
+      this.canShareFiles.set(computeCanShareFiles(this.blob, this.filename()));
     } finally {
       this.busy.set(false);
     }
   }
 
   private filename(): string {
-    const safe = (this.systemSymbol || 'system').replace(/[^a-z0-9_-]+/gi, '_');
-    return `skamkraft-${safe}.png`;
-  }
-
-  private computeCanShareFiles(): boolean {
-    if (!this.blob) return false;
-    const nav = navigator as Navigator & ShareCapableNavigator;
-    if (typeof nav.canShare !== 'function') return false;
-    try {
-      const probe = new File([this.blob], this.filename(), { type: 'image/png' });
-      return nav.canShare({ files: [probe] });
-    } catch {
-      return false;
-    }
+    return `skamkraft-${sanitizeFilenamePart(this.systemSymbol, 'system')}.png`;
   }
 
   download(): void {
@@ -104,7 +89,7 @@ export class PostcardDialogComponent {
     if (!this.blob) return;
     const nav = navigator as Navigator & ShareCapableNavigator;
     const file = new File([this.blob], this.filename(), { type: 'image/png' });
-    if (typeof nav.share !== 'function' || !this.computeCanShareFiles()) {
+    if (typeof nav.share !== 'function' || !computeCanShareFiles(this.blob, this.filename())) {
       this.snackbar.show('Sharing not supported here — use Download.', 'info');
       return;
     }
