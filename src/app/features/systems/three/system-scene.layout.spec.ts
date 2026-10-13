@@ -5,10 +5,8 @@ import {
   computeSystemLayout3d,
   getPlanetRadius3d,
   getPlanetSimRadiusKm,
-  shipMarkerScale,
-  shipOrbitDistance,
 } from './system-scene.layout';
-import { ORBIT_ALTITUDE_KM, RENDER_KM_PER_UNIT } from './physics-units';
+import { RENDER_KM_PER_UNIT } from './physics-units';
 
 function makePlanet(name: string, x: number, y: number, type = 'PLANET'): PlanetView {
   return { name, type, system: 'X1-TEST', position: { x, y }, traits: [] };
@@ -60,29 +58,6 @@ describe('getPlanetRadius3d', () => {
 describe('getPlanetSimRadiusKm', () => {
   it('returns sim km for a planet type', () => {
     expect(getPlanetSimRadiusKm(makePlanet('p', 0, 0, 'PLANET'))).toBeGreaterThan(5_000);
-  });
-});
-
-describe('shipMarkerScale', () => {
-  it('scales with waypoint radius and bumps up the selected ship', () => {
-    expect(shipMarkerScale(5, false)).toBeCloseTo(0.225, 6);
-    expect(shipMarkerScale(5, true)).toBeCloseTo(0.225 * 1.25, 6);
-  });
-
-  it('clamps to the [0.1, 0.35] range', () => {
-    expect(shipMarkerScale(0, false)).toBe(0.1);
-    expect(shipMarkerScale(1000, false)).toBe(0.35);
-  });
-});
-
-describe('shipOrbitDistance', () => {
-  it('offsets fleet rings based on sim radius plus orbit altitude', () => {
-    const simKm = 6_000;
-    const renderR = simKm / RENDER_KM_PER_UNIT;
-    expect(shipOrbitDistance(renderR, simKm)).toBeCloseTo(
-      (simKm + ORBIT_ALTITUDE_KM) / RENDER_KM_PER_UNIT,
-      6,
-    );
   });
 });
 

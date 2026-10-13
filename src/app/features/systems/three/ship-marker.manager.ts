@@ -1,22 +1,11 @@
-import {
-  Group,
-  Mesh,
-  MeshBasicMaterial,
-  Object3D,
-  RingGeometry,
-  Vector3,
-} from 'three';
+import { Group, Mesh, MeshBasicMaterial, Object3D, RingGeometry, Vector3 } from 'three';
 import { ShipData } from '../../../models/ship.model';
 import { PlanetView } from '../../../models/system.model';
 import { buildProceduralShip, disposeShip } from '../../ships/ship-procedural.builder';
-import {
-  getStableTransitProgress,
-  shipInOrbit,
-  shipInTransit,
-} from '../planet-helpers';
+import { getStableTransitProgress, shipInOrbit, shipInTransit } from '../planet-helpers';
 import { getMuForBody } from './celestial-mass';
 import { ShipDynamicsEngine } from './ship-dynamics.engine';
-import { shipMarkerScale } from './system-scene.layout';
+import { shipMarkerRenderScale } from './render-transform';
 import { SystemOrbitEngine } from './system-orbit.engine';
 import { disposeObject3D } from './three-dispose.util';
 
@@ -113,7 +102,7 @@ export class ShipMarkerManager {
       shipsAt.forEach((ship, index) => {
         if (ship.symbol === selected) return;
         const inOrbit = shipInOrbit(ship);
-        const marker = this.createShipMarker(ship, shipMarkerScale(entry.radius, false));
+        const marker = this.createShipMarker(ship, shipMarkerRenderScale(entry.radius, false));
         marker.userData['markerData'] = {
           kind: inOrbit ? 'orbit' : 'docked',
           ship,
@@ -139,7 +128,7 @@ export class ShipMarkerManager {
       if (!originPlanet || !destPlanet) continue;
       if (ship.symbol === selected) continue;
 
-      const marker = this.createShipMarker(ship, shipMarkerScale(originPlanet.radius, false));
+      const marker = this.createShipMarker(ship, shipMarkerRenderScale(originPlanet.radius, false));
       marker.userData['markerData'] = {
         kind: 'transit',
         ship,
@@ -147,7 +136,10 @@ export class ShipMarkerManager {
         destSymbol: route.destination.symbol,
       } satisfies TransitShipMarkerData;
       marker.userData['ship'] = ship;
-      const blip = this.createShipBlip(Math.max(2.5, originPlanet.radius * 0.5), this.resolveBlipColor(ship, BLIP_TRANSIT_COLOR));
+      const blip = this.createShipBlip(
+        Math.max(2.5, originPlanet.radius * 0.5),
+        this.resolveBlipColor(ship, BLIP_TRANSIT_COLOR),
+      );
       marker.userData['blip'] = blip;
       this.blips.add(blip);
       this.markers.add(marker);

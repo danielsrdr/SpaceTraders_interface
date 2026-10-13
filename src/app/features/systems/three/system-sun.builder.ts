@@ -69,7 +69,7 @@ function createSunGlowMaterial(color: number, intensity: number, power: number):
   return new ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uColor: { value: new Color(c.r, c.g, c.b) },
+      uColor: { value: c.clone() },
       uIntensity: { value: intensity },
       uPower: { value: power },
     },

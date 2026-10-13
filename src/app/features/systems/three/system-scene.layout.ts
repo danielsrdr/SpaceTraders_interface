@@ -1,12 +1,6 @@
 import { PlanetView, Position } from '../../../models/system.model';
 import { getSimRadiusKm } from './celestial-mass';
-import {
-  bodyViewRenderOffset,
-  renderRadius,
-  shipMarkerRenderScale,
-  shipOrbitRenderDistance,
-  shipOrbitVerticalOffset,
-} from './render-transform';
+import { bodyViewRenderOffset, renderRadius, shipOrbitVerticalOffset } from './render-transform';
 
 export interface SystemLayout3d {
   scale: number;
@@ -99,7 +93,7 @@ export function planetWorldPosition3d(
 }
 
 /** Render radius in Three.js world units, derived from sim km + type profile. */
-export function getPlanetRadius3d(planet: PlanetView, _layout?: SystemLayout3d): number {
+export function getPlanetRadius3d(planet: PlanetView): number {
   return renderRadius(getSimRadiusKm(planet), 'local');
 }
 
@@ -108,24 +102,17 @@ export function getPlanetSimRadiusKm(planet: PlanetView): number {
   return getSimRadiusKm(planet);
 }
 
-/** Ship marker scale relative to nearby waypoint radius. */
-export function shipMarkerScale(waypointRadius: number, selected: boolean): number {
-  return shipMarkerRenderScale(waypointRadius, selected);
-}
-
-/** Orbit ring distance for fleet markers around a waypoint (render units). */
-export function shipOrbitDistance(waypointRenderRadius: number, simRadiusKm?: number): number {
-  const simR = simRadiusKm ?? waypointRenderRadius * 1_200;
-  return shipOrbitRenderDistance(waypointRenderRadius, simR);
-}
-
 /** Vertical offset for docked / orbiting ships above the equatorial plane. */
 export function shipOrbitHeightOffset(waypointRenderRadius: number): number {
   return shipOrbitVerticalOffset(waypointRenderRadius);
 }
 
 /** Camera standoff from a body centre (render units). */
-export function bodyViewOffsetForRadius(bodyRenderRadius: number): { x: number; y: number; z: number } {
+export function bodyViewOffsetForRadius(bodyRenderRadius: number): {
+  x: number;
+  y: number;
+  z: number;
+} {
   const v = bodyViewRenderOffset(bodyRenderRadius);
   return { x: v.x, y: v.y, z: v.z };
 }

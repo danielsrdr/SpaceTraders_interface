@@ -20,7 +20,7 @@ export function renderRadius(simRadiusKm: number, context: RenderContext = 'loca
 }
 
 /** Orbit ring radius in render units for a body with the given render radius. */
-export function shipOrbitRenderDistance(bodyRenderRadius: number, simRadiusKm: number): number {
+export function shipOrbitRenderDistance(simRadiusKm: number): number {
   return renderRadius(simRadiusKm + ORBIT_ALTITUDE_KM, 'local');
 }
 
@@ -59,7 +59,8 @@ export function shipRenderScale(
   fovDeg: number,
 ): number {
   const lengthM = SHIP_LENGTH_M[role] ?? DEFAULT_SHIP_LENGTH_M;
-  const baseScale = hullLengthRender > 0 ? hullLengthRender : lengthM / 1000 / RENDER_KM_PER_UNIT * 100;
+  const baseScale =
+    hullLengthRender > 0 ? hullLengthRender : (lengthM / 1000 / RENDER_KM_PER_UNIT) * 100;
 
   if (cameraDistance <= 0 || viewportHeight <= 0) return baseScale;
 

@@ -52,7 +52,10 @@ import {
   caveProgressPercent,
   recordCrystalBroken,
 } from '../../core/state/cave-progress.store';
-import { SurfaceDiscoveryStore, FOOTPRINT_CELL_SIZE } from '../../core/state/surface-discovery.store';
+import {
+  SurfaceDiscoveryStore,
+  FOOTPRINT_CELL_SIZE,
+} from '../../core/state/surface-discovery.store';
 import { createPointerLockControls, FpsControls } from './three/fps-controls';
 import { fpsGravityForPlanet } from './three/celestial-mass';
 import { getActiveZone, SurfaceZone } from './three/surface-zones';
@@ -86,9 +89,13 @@ import {
   type LaunchExhaustEffects,
 } from './three/surface-launch-effects';
 import { LaunchAnimation, type LaunchPhase } from './three/launch-animation';
+import { easeInOut } from './three/transit-arc.math';
 import { applyCameraShake, prefersReducedMotion } from './three/motion.util';
 import { projectPoiLabels, type SurfacePoiLabel } from './three/surface/surface-label-projector';
-import { computeDayNight, applyWeatherFogShrink } from './three/surface/surface-day-night.controller';
+import {
+  computeDayNight,
+  applyWeatherFogShrink,
+} from './three/surface/surface-day-night.controller';
 import { ExoSuitHudComponent, type ExoPoiCompass } from './exo-suit-hud/exo-suit-hud.component';
 import { SurfaceMarketDialogComponent } from './surface-market-dialog.component';
 import { SurfacePostcardDialogComponent } from '../postcard/surface-postcard-dialog.component';
@@ -455,10 +462,6 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     return 1 - Math.pow(1 - t, 3);
   }
 
-  private easeInOut(t: number): number {
-    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-  }
-
   openStamp(): void {
     const captain = this.captain();
     if (!captain || !this.world) return;
@@ -503,9 +506,8 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     }
     this.launchCamStart.copy(this.camera.position);
 
-    const shipRole = (this.boardingShip()?.registration.role ?? this.landedShipGroup?.userData['shipRole']) as
-      | string
-      | undefined;
+    const shipRole = (this.boardingShip()?.registration.role ??
+      this.landedShipGroup?.userData['shipRole']) as string | undefined;
 
     if (this.landedShipGroup && this.scene) {
       this.clearLaunchEffects();
@@ -564,7 +566,12 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
         }
       }
 
-      this.launchEffects?.update(motion.heat, this.launchElapsed, ship.position, this.launchGroundY);
+      this.launchEffects?.update(
+        motion.heat,
+        this.launchElapsed,
+        ship.position,
+        this.launchGroundY,
+      );
 
       const levCamT = motion.phase === 'levitate' || motion.phase === 'preflight' ? 0.65 : 1;
       const climbT = motion.climbProgress;
@@ -646,7 +653,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
 
   private updateBoarding(delta: number): void {
     this.boardingProgress = Math.min(1, this.boardingProgress + delta / 1.1);
-    const eased = this.easeInOut(this.boardingProgress);
+    const eased = easeInOut(this.boardingProgress);
     this.camera.position.lerpVectors(this.boardingCamStart, this.boardingCamTarget, eased);
     if (this.landedShipGroup) {
       this.camera.lookAt(this.landedShipPos.x, this.landedShipPos.y + 1.2, this.landedShipPos.z);
@@ -992,10 +999,8 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
 
     if (!beacons.length) return;
 
-    const built = buildContractCrates(
-      beacons,
-      world.pois,
-      (x, z) => world.heightField.getHeight(x, z),
+    const built = buildContractCrates(beacons, world.pois, (x, z) =>
+      world.heightField.getHeight(x, z),
     );
     world.root.add(built.group);
     built.colliders.forEach((c) => world.colliders.add(c, 'contract'));
@@ -1047,11 +1052,13 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
       case 'cave':
         if (this.caveInteriorActive()) {
           if (this.tryCaveBlock()) return;
-          if (this.world?.caveTunnels?.isNearExit(
-            this.camera.position.x,
-            this.camera.position.y,
-            this.camera.position.z,
-          )) {
+          if (
+            this.world?.caveTunnels?.isNearExit(
+              this.camera.position.x,
+              this.camera.position.y,
+              this.camera.position.z,
+            )
+          ) {
             this.beginCaveExit();
           }
         } else if (this.world?.caveTunnels) {
@@ -1187,12 +1194,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     if (!result) return false;
 
     if (result.wasOre) {
-      const progress = recordOreBroken(
-        planetName,
-        result.key,
-        world.tunnels.getTotalOres(),
-        agent,
-      );
+      const progress = recordOreBroken(planetName, result.key, world.tunnels.getTotalOres(), agent);
       const pct = mineProgressPercent(progress);
       this.zone.run(() => {
         this.mineProgressPct.set(pct);
@@ -1299,9 +1301,10 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
         this.finishCaveExitMid();
       }
     }
-    const veil = this.caveTransitionProgress < 0.5
-      ? 1 - this.caveTransitionProgress * 2
-      : (this.caveTransitionProgress - 0.5) * 2;
+    const veil =
+      this.caveTransitionProgress < 0.5
+        ? 1 - this.caveTransitionProgress * 2
+        : (this.caveTransitionProgress - 0.5) * 2;
     this.zone.run(() => this.entryVeil.set(1 - veil));
 
     if (this.caveTransitionProgress >= 1) {
@@ -1367,11 +1370,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   private updateNearClerk(zone: SurfaceZone | null): boolean {
     const world = this.world;
     if (!world?.marketClerk || zone?.kind !== 'market') return false;
-    return isNearMarketClerk(
-      this.camera.position.x,
-      this.camera.position.z,
-      world.marketClerk,
-    );
+    return isNearMarketClerk(this.camera.position.x, this.camera.position.z, world.marketClerk);
   }
 
   private resize(): void {
@@ -1438,8 +1437,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
         fogDayColor: profile ? new Color(profile.fogColor) : FOG_DAY,
         weatherIntensity: this.surfaceWeather.intensity,
       },
-      (x, y, z) =>
-        setTerrainSunDirection(this.world!.terrainManager.material, x, y, z),
+      (x, y, z) => setTerrainSunDirection(this.world!.terrainManager.material, x, y, z),
       (boost) => this.world!.tunnels?.setNightVeinBoost(boost),
     );
   }

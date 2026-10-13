@@ -132,7 +132,12 @@ function tintedColor(base: number, name: string): Color {
   return c;
 }
 
-function addAtmosphereRim(group: Group, radius: number, glowColor: number, planet: PlanetView): void {
+function addAtmosphereRim(
+  group: Group,
+  radius: number,
+  glowColor: number,
+  planet: PlanetView,
+): void {
   const glow = new Color(glowColor);
   const material = new ShaderMaterial({
     uniforms: {
@@ -256,7 +261,12 @@ function buildSphereBody(
   return surfaceTarget;
 }
 
-function buildStation(group: Group, radius: number, palette: typeof TYPE_PALETTE['ORBITAL_STATION'], planet: PlanetView): void {
+function buildStation(
+  group: Group,
+  radius: number,
+  palette: (typeof TYPE_PALETTE)['ORBITAL_STATION'],
+  planet: PlanetView,
+): void {
   const mat = new MeshStandardMaterial({
     color: palette.color,
     emissive: new Color(palette.emissive),
@@ -276,14 +286,23 @@ function buildStation(group: Group, radius: number, palette: typeof TYPE_PALETTE
   for (let i = 0; i < 4; i++) {
     const arm = new Mesh(new BoxGeometry(radius * 0.15, radius * 0.15, radius * 1.4), mat);
     arm.rotation.y = (Math.PI / 2) * i;
-    arm.position.set(Math.sin(arm.rotation.y) * radius * 0.7, 0, Math.cos(arm.rotation.y) * radius * 0.7);
+    arm.position.set(
+      Math.sin(arm.rotation.y) * radius * 0.7,
+      0,
+      Math.cos(arm.rotation.y) * radius * 0.7,
+    );
     arm.userData['planet'] = planet;
     group.add(arm);
   }
   addGlowShell(group, radius * 1.5, palette.glow, planet);
 }
 
-function buildJumpGate(group: Group, radius: number, palette: typeof TYPE_PALETTE['JUMP_GATE'], planet: PlanetView): void {
+function buildJumpGate(
+  group: Group,
+  radius: number,
+  palette: (typeof TYPE_PALETTE)['JUMP_GATE'],
+  planet: PlanetView,
+): void {
   const mat = new MeshStandardMaterial({
     color: palette.color,
     emissive: new Color(palette.glow),
@@ -314,7 +333,12 @@ function buildJumpGate(group: Group, radius: number, palette: typeof TYPE_PALETT
   group.add(inner);
 }
 
-function buildAsteroid(group: Group, radius: number, palette: typeof TYPE_PALETTE['ASTEROID'], planet: PlanetView): void {
+function buildAsteroid(
+  group: Group,
+  radius: number,
+  palette: (typeof TYPE_PALETTE)['ASTEROID'],
+  planet: PlanetView,
+): void {
   const mat = new MeshStandardMaterial({
     color: tintedColor(palette.color, planet.name),
     emissive: new Color(palette.emissive),
@@ -328,7 +352,12 @@ function buildAsteroid(group: Group, radius: number, palette: typeof TYPE_PALETT
   group.add(rock);
 }
 
-function buildDebrisField(group: Group, radius: number, palette: typeof TYPE_PALETTE['DEBRIS_FIELD'], planet: PlanetView): void {
+function buildDebrisField(
+  group: Group,
+  radius: number,
+  palette: (typeof TYPE_PALETTE)['DEBRIS_FIELD'],
+  planet: PlanetView,
+): void {
   const mat = new MeshStandardMaterial({
     color: palette.color,
     emissive: new Color(palette.emissive),
@@ -339,13 +368,22 @@ function buildDebrisField(group: Group, radius: number, palette: typeof TYPE_PAL
     const s = radius * (0.15 + (i % 5) * 0.08);
     const rock = new Mesh(new OctahedronGeometry(s, 0), mat);
     const angle = (i / 12) * Math.PI * 2;
-    rock.position.set(Math.cos(angle) * radius * 0.65, (i % 3) * 0.4 - 0.4, Math.sin(angle) * radius * 0.65);
+    rock.position.set(
+      Math.cos(angle) * radius * 0.65,
+      (i % 3) * 0.4 - 0.4,
+      Math.sin(angle) * radius * 0.65,
+    );
     rock.userData['planet'] = planet;
     group.add(rock);
   }
 }
 
-function buildGravityWell(group: Group, radius: number, palette: typeof TYPE_PALETTE['GRAVITY_WELL'], planet: PlanetView): void {
+function buildGravityWell(
+  group: Group,
+  radius: number,
+  palette: (typeof TYPE_PALETTE)['GRAVITY_WELL'],
+  planet: PlanetView,
+): void {
   const core = new Mesh(
     new SphereGeometry(radius * 0.55, 24, 24),
     new MeshStandardMaterial({
@@ -381,7 +419,7 @@ export function buildCelestialBody(
 ): CelestialBodyResult {
   const resolved = resolveWaypointType(planet.type);
   const palette = TYPE_PALETTE[resolved] ?? TYPE_PALETTE['PLANET']!;
-  const radius = getPlanetRadius3d(planet, layout);
+  const radius = getPlanetRadius3d(planet);
 
   const group = new Group();
   group.name = `planet-${planet.name}`;
@@ -430,10 +468,28 @@ export function buildCelestialBody(
       break;
     }
     case 'MOON':
-      surfaceTarget = buildSphereBody(group, radius, palette, planet, 24, undefined, resolved, baker);
+      surfaceTarget = buildSphereBody(
+        group,
+        radius,
+        palette,
+        planet,
+        24,
+        undefined,
+        resolved,
+        baker,
+      );
       break;
     default: {
-      surfaceTarget = buildSphereBody(group, radius, palette, planet, 32, undefined, resolved, baker);
+      surfaceTarget = buildSphereBody(
+        group,
+        radius,
+        palette,
+        planet,
+        32,
+        undefined,
+        resolved,
+        baker,
+      );
       break;
     }
   }

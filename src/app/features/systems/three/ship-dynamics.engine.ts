@@ -1,12 +1,9 @@
 import { Object3D, Quaternion, Vector3 } from 'three';
-import { ShipData, ShipNavFlightMode } from '../../../models/ship.model';
+import { ShipData } from '../../../models/ship.model';
 import { shipInTransit } from '../planet-helpers';
 import { getMuForBody } from './celestial-mass';
 import { circularOrbitSpeedKmS } from './gravity-field';
-import {
-  ORBIT_ALTITUDE_KM,
-  USE_PHYSICS_DYNAMICS,
-} from './physics-units';
+import { ORBIT_ALTITUDE_KM, USE_PHYSICS_DYNAMICS } from './physics-units';
 import { orbitVisualTimeScale } from './orbit-visual-scale';
 import { renderRadius, shipOrbitRenderDistance, shipOrbitVerticalOffset } from './render-transform';
 import { orientAlongArc, sampleTransitArc } from './transit-arc.math';
@@ -55,12 +52,7 @@ function flightModeLiftMultiplier(mode: string): number {
   }
 }
 
-function ballisticMidpoint(
-  v0: Vector3,
-  v2: Vector3,
-  flightMode: string,
-  target: Vector3,
-): Vector3 {
+function ballisticMidpoint(v0: Vector3, v2: Vector3, flightMode: string, target: Vector3): Vector3 {
   const dist = v0.distanceTo(v2);
   const lift = Math.max(6, dist * 0.18) * flightModeLiftMultiplier(flightMode);
   return target.set((v0.x + v2.x) * 0.5, (v0.y + v2.y) * 0.5 + lift, (v0.z + v2.z) * 0.5);
@@ -194,11 +186,7 @@ export class ShipDynamicsEngine {
   }
 
   /** Precompute or refresh a ballistic transit path between two world positions. */
-  ensureTransitPath(
-    ship: ShipData,
-    originPos: Vector3,
-    destPos: Vector3,
-  ): TransitPath {
+  ensureTransitPath(ship: ShipData, originPos: Vector3, destPos: Vector3): TransitPath {
     const key = this.transitKey(ship);
     const flightMode = ship.nav.flightMode ?? 'CRUISE';
     const existing = this.transitPaths.get(key);
@@ -241,9 +229,7 @@ export class ShipDynamicsEngine {
       return {
         position: this.posePosition.clone(),
         velocity: this.poseVelocity.set(0, 0, 0),
-        quaternion: targetObj
-          ? targetObj.quaternion.clone()
-          : this.poseQuat.set(0, 0, 0, 1),
+        quaternion: targetObj ? targetObj.quaternion.clone() : this.poseQuat.set(0, 0, 0, 1),
       };
     }
 
@@ -259,9 +245,7 @@ export class ShipDynamicsEngine {
     return {
       position: this.posePosition.clone(),
       velocity: this.poseVelocity.clone(),
-      quaternion: targetObj
-        ? targetObj.quaternion.clone()
-        : this.poseQuat.set(0, 0, 0, 1),
+      quaternion: targetObj ? targetObj.quaternion.clone() : this.poseQuat.set(0, 0, 0, 1),
     };
   }
 
@@ -296,12 +280,11 @@ export class ShipDynamicsEngine {
     orbitTotal: number,
     target = new Vector3(),
   ): Vector3 {
-    const orbitRenderR = shipOrbitRenderDistance(renderRadius(simRadiusKm, 'local'), simRadiusKm);
+    const orbitRenderR = shipOrbitRenderDistance(simRadiusKm);
     const orbitKm = simRadiusKm + ORBIT_ALTITUDE_KM;
     const omega =
       (circularOrbitSpeedKmS(parentMu, orbitKm) / orbitKm) * orbitVisualTimeScale(parentMu);
-    const phase =
-      (orbitTotal > 1 ? (orbitIndex / orbitTotal) * Math.PI * 2 : 0) + omega * simTime;
+    const phase = (orbitTotal > 1 ? (orbitIndex / orbitTotal) * Math.PI * 2 : 0) + omega * simTime;
     const x = Math.cos(phase) * orbitRenderR;
     const z = Math.sin(phase) * orbitRenderR;
     const y = shipOrbitVerticalOffset(renderRadius(simRadiusKm, 'local'));
@@ -344,7 +327,7 @@ export class ShipDynamicsEngine {
     }
 
     // DOCKED — stationary standoff
-    const orbitR = shipOrbitRenderDistance(renderRadius(simRadiusKm, 'local'), simRadiusKm);
+    const orbitR = shipOrbitRenderDistance(simRadiusKm);
     const angle = orbitTotal > 1 ? (orbitIndex / orbitTotal) * Math.PI * 2 : 0;
     const y = shipOrbitVerticalOffset(renderRadius(simRadiusKm, 'local'));
     this.posePosition.set(
@@ -376,19 +359,3 @@ export class ShipDynamicsEngine {
     this.orbitSlots.clear();
   }
 }
-
-/** Thrust direction magnitude hint per flight mode (visual only). */
-export function thrustForMode(mode: ShipNavFlightMode | string): number {
-  switch (mode) {
-    case 'DRIFT':
-      return 0;
-    case 'STEALTH':
-      return 0.3;
-    case 'BURN':
-      return 1.0;
-    case 'CRUISE':
-    default:
-      return 0.6;
-  }
-}
-

@@ -1,4 +1,7 @@
+import { MathUtils } from 'three';
 import { easeInOut } from './transit-arc.math';
+
+const { lerp } = MathUtils;
 
 export type LaunchPhase = 'preflight' | 'levitate' | 'pitch' | 'climb';
 
@@ -48,13 +51,13 @@ function easeInExpo(t: number): number {
   return Math.pow(2, 10 * t - 10);
 }
 
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
 function roleLevitationEnd(role: string | undefined): number {
   const profile = role?.toUpperCase() ?? '';
-  if (profile.includes('INTERCEPTOR') || profile.includes('PATROL') || profile.includes('FIGHTER')) {
+  if (
+    profile.includes('INTERCEPTOR') ||
+    profile.includes('PATROL') ||
+    profile.includes('FIGHTER')
+  ) {
     return 0.28;
   }
   if (
@@ -115,9 +118,7 @@ export class LaunchAnimation {
       };
     }
 
-    const motionU = this.reducedMotion
-      ? u
-      : (u - PREFLIGHT_FRACTION) / (1 - PREFLIGHT_FRACTION);
+    const motionU = this.reducedMotion ? u : (u - PREFLIGHT_FRACTION) / (1 - PREFLIGHT_FRACTION);
     const levEnd = this.levitationEnd;
     const pitchEnd = this.reducedMotion ? levEnd + 0.08 : PITCH_END;
 
