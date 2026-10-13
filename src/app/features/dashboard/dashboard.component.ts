@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  OnDestroy,
+  OnInit,
+  signal,
+} from '@angular/core';
 import { Router } from '@angular/router';
 import { AgentStore } from '../../core/state/agent.store';
 import { AnalyticsStore } from '../../core/state/analytics.store';
@@ -9,6 +17,7 @@ import { SparklineComponent } from '../../shared/components/charts/sparkline.com
 import { NavActivityService } from '../../shared/services/nav-activity.service';
 import { PageBackgroundService } from '../../shared/services/page-background.service';
 import { exportToCsv } from '../../shared/utils/csv-export.util';
+import { formatCompact, formatCredits } from '../../shared/utils/format.util';
 import { Achievement, ACHIEVEMENT_BY_ID } from '../codex/achievements';
 import { AchievementsService } from '../codex/achievements.service';
 import { CodexThumbnailService } from '../codex/codex-thumbnail.service';
@@ -70,42 +79,48 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly hasData = computed(() => this.analytics.totalEvents() > 0);
   readonly analyticsCount = computed(() => this.analytics.totalEvents());
 
-  readonly revenuePerHour = computed(() => this.analytics.revenuePerHour(this.windowHours(), this.now()));
+  readonly revenuePerHour = computed(() =>
+    this.analytics.revenuePerHour(this.windowHours(), this.now()),
+  );
   readonly netCredits = computed(() => this.analytics.netCredits(this.windowHours(), this.now()));
   readonly fuelBurned = computed(() => this.analytics.fuelBurned(this.windowHours(), this.now()));
 
-  readonly netComparison = computed(() => this.analytics.compareNetCredits(this.windowHours(), this.now()));
+  readonly netComparison = computed(() =>
+    this.analytics.compareNetCredits(this.windowHours(), this.now()),
+  );
   readonly revenueComparison = computed(() =>
     this.analytics.compareRevenuePerHour(this.windowHours(), this.now()),
   );
-  readonly fuelComparison = computed(() => this.analytics.compareFuelBurned(this.windowHours(), this.now()));
+  readonly fuelComparison = computed(() =>
+    this.analytics.compareFuelBurned(this.windowHours(), this.now()),
+  );
 
   readonly topRoutes = computed(() => this.analytics.topRoutes(6, this.windowHours(), this.now()));
   readonly maxRouteCount = computed(() => Math.max(1, ...this.topRoutes().map((r) => r.count)));
 
-  readonly fuelByShip = computed(() => this.analytics.fuelByShip(this.windowHours(), this.now()).slice(0, 6));
+  readonly fuelByShip = computed(() =>
+    this.analytics.fuelByShip(this.windowHours(), this.now()).slice(0, 6),
+  );
   readonly maxShipFuel = computed(() => Math.max(1, ...this.fuelByShip().map((s) => s.fuel)));
 
   readonly fuelSparklines = computed(() => {
     const ships = this.fuelByShip();
     const buckets = this.analytics.fuelBuckets(this.windowHours(), 12, this.now());
     return ships.map((s) => {
-      const shipEvents = this.analytics.events().filter(
-        (e) => e.ship === s.ship && e.kind === 'navigate' && e.fuel != null,
-      );
-      const values = this.analytics
-        .fuelBuckets(this.windowHours(), 12, this.now())
-        .map((_, i) => {
-          const span = Math.max(1, this.windowHours()) * 3_600_000;
-          const start = this.now() - span;
-          const size = span / 12;
-          let fuel = 0;
-          for (const e of shipEvents) {
-            let idx = Math.floor((e.t - start) / size);
-            if (idx === i) fuel += e.fuel ?? 0;
-          }
-          return fuel;
-        });
+      const shipEvents = this.analytics
+        .events()
+        .filter((e) => e.ship === s.ship && e.kind === 'navigate' && e.fuel != null);
+      const values = this.analytics.fuelBuckets(this.windowHours(), 12, this.now()).map((_, i) => {
+        const span = Math.max(1, this.windowHours()) * 3_600_000;
+        const start = this.now() - span;
+        const size = span / 12;
+        let fuel = 0;
+        for (const e of shipEvents) {
+          let idx = Math.floor((e.t - start) / size);
+          if (idx === i) fuel += e.fuel ?? 0;
+        }
+        return fuel;
+      });
       void buckets;
       return { ship: s.ship, fuel: s.fuel, sparkline: values };
     });
@@ -245,14 +260,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.exportOpen.set(false);
   }
 
-  formatCredits(value: number): string {
-    const rounded = Math.round(value);
-    return `${rounded < 0 ? '-' : ''}${Math.abs(rounded).toLocaleString()}c`;
-  }
-
-  formatCompact(value: number): string {
-    return Math.round(value).toLocaleString();
-  }
+  readonly formatCredits = formatCredits;
+  readonly formatCompact = formatCompact;
 
   formatTime(timestamp: number): string {
     const date = new Date(timestamp);
@@ -263,7 +272,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   badge(achievement: Achievement, unlocked = true): string {
-    return this.thumbnails.achievementBadge(achievement.id, achievement.color, achievement.tier, unlocked);
+    return this.thumbnails.achievementBadge(
+      achievement.id,
+      achievement.color,
+      achievement.tier,
+      unlocked,
+    );
   }
 
   pct(ratio: number): number {

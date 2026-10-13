@@ -1,4 +1,14 @@
-import { Component, computed, effect, ElementRef, inject, OnDestroy, OnInit, signal, viewChild } from '@angular/core';
+import {
+  Component,
+  computed,
+  effect,
+  ElementRef,
+  inject,
+  OnDestroy,
+  OnInit,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FactionData } from '../../models/faction.model';
 import { SpaceTradersApiService } from '../../services/spacetraders-api.service';
@@ -9,6 +19,7 @@ import {
 } from '../../core/state/surface-discovery.store';
 import { PageBackgroundService } from '../../shared/services/page-background.service';
 import { factionColor } from '../../shared/faction-colors';
+import { formatCompactNum } from '../../shared/utils/format.util';
 import { resolveWaypointType } from '../systems/planet-helpers';
 import { goodCategory, goodLabel } from '../systems/trade-good-visuals';
 import { WORLD_RADIUS } from '../systems/three/terrain/terrain-height';
@@ -20,7 +31,13 @@ import { AchievementProgress } from './achievements';
 import { AchievementsService } from './achievements.service';
 import { MissionDirectorService } from '../mission-director/mission-director.service';
 
-export type CodexTab = 'waypoints' | 'factions' | 'goods' | 'surface' | 'achievements' | 'operations';
+export type CodexTab =
+  | 'waypoints'
+  | 'factions'
+  | 'goods'
+  | 'surface'
+  | 'achievements'
+  | 'operations';
 
 export interface CodexCard {
   id: string;
@@ -182,7 +199,8 @@ export class CodexComponent implements OnInit, OnDestroy {
   });
   readonly headerTotal = computed(() => {
     if (this.tab() === 'achievements') return this.achievements.total;
-    if (this.tab() === 'operations') return Math.max(5, this.missionDirector.recentOperations().length);
+    if (this.tab() === 'operations')
+      return Math.max(5, this.missionDirector.recentOperations().length);
     return this.activeCards().length;
   });
   readonly progressPct = computed(() => {
@@ -317,11 +335,7 @@ export class CodexComponent implements OnInit, OnDestroy {
     );
   }
 
-  formatCompactNum(value: number): string {
-    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
-    if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k`;
-    return Math.round(value).toLocaleString();
-  }
+  readonly formatCompactNum = formatCompactNum;
 
   private async loadFactions(): Promise<void> {
     try {

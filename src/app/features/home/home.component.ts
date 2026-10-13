@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  OnDestroy,
+  OnInit,
+  signal,
+} from '@angular/core';
 import { Router } from '@angular/router';
 import { AgentStore } from '../../core/state/agent.store';
 import { AnalyticsStore } from '../../core/state/analytics.store';
@@ -16,6 +24,7 @@ import { factionColor } from '../../shared/faction-colors';
 import { NavActivityService } from '../../shared/services/nav-activity.service';
 import { PageBackgroundService } from '../../shared/services/page-background.service';
 import { SnackbarService } from '../../shared/services/snackbar.service';
+import { formatCompact, formatCredits } from '../../shared/utils/format.util';
 import { FleetMiniMapComponent } from './fleet-mini-map.component';
 import { getTransitProgress, shipInTransit } from '../systems/planet-helpers';
 
@@ -160,14 +169,8 @@ export class HomeComponent implements OnInit, OnDestroy {
     });
   }
 
-  formatCredits(value: number): string {
-    const rounded = Math.round(value);
-    return `${rounded < 0 ? '-' : ''}${Math.abs(rounded).toLocaleString()}c`;
-  }
-
-  formatCompact(value: number): string {
-    return Math.round(value).toLocaleString();
-  }
+  readonly formatCredits = formatCredits;
+  readonly formatCompact = formatCompact;
 
   formatLogTime(timestamp: number): string {
     return new Date(timestamp).toLocaleTimeString(undefined, {
