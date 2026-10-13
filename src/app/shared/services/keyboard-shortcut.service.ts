@@ -33,15 +33,6 @@ export class KeyboardShortcutService {
     this.destroyRef.onDestroy(() => document.removeEventListener('keydown', onKeyDown));
   }
 
-  /** True when global overlays consume keyboard input. */
-  blocksLocalShortcuts(): boolean {
-    return this.palette.open() || this.helpOpen();
-  }
-
-  openHelp(): void {
-    this.helpOpen.set(true);
-  }
-
   closeHelp(): void {
     this.helpOpen.set(false);
   }

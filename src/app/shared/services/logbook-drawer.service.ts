@@ -9,10 +9,6 @@ export class LogbookDrawerService {
     this.open.update((v) => !v);
   }
 
-  openDrawer(): void {
-    this.open.set(true);
-  }
-
   close(): void {
     this.open.set(false);
   }
