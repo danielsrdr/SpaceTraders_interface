@@ -1,5 +1,6 @@
 import { Component, computed, inject } from '@angular/core';
 import { CockpitLogService } from '../../cockpit-log.service';
+import { cargoUnitsOf, maxCargoProceeds, shipsDockedAt } from '../../planet-helpers';
 import { ShipActionsService } from '../../ship-actions.service';
 import { SystemMapStore } from '../../system-map.store';
 import { TradeGoodRowComponent } from '../../trade-good-row.component';
@@ -22,32 +23,18 @@ export class CockpitMarketTabComponent {
   readonly tradeSymbol = this.shipActions.tradeSymbol;
   readonly tradeUnits = this.shipActions.tradeUnits;
 
-  readonly maxCargoProceeds = computed(() => {
-    const market = this.market();
-    const cargo = this.shipCargo();
-    if (!market?.tradeGoods || !cargo) return 0;
-    let max = 0;
-    for (const good of market.tradeGoods) {
-      const held = cargo.inventory.find((item) => item.symbol === good.symbol)?.units ?? 0;
-      max = Math.max(max, held * good.sellPrice);
-    }
-    return max;
-  });
+  readonly maxCargoProceeds = computed(() => maxCargoProceeds(this.market(), this.shipCargo()));
 
   actionLoading(key: string): boolean {
     return this.cockpitLog.actionLoading(key);
   }
 
   cargoUnitsOf(symbol: string): number {
-    const cargo = this.shipCargo();
-    if (!cargo) return 0;
-    return cargo.inventory.find((item) => item.symbol === symbol)?.units ?? 0;
+    return cargoUnitsOf(this.shipCargo(), symbol);
   }
 
   dockedAt(waypointSymbol: string) {
-    return this.ships().filter(
-      (s) => s.nav.waypointSymbol === waypointSymbol && s.nav.status === 'DOCKED',
-    );
+    return shipsDockedAt(this.ships(), waypointSymbol);
   }
 
   loadMarket(): void {

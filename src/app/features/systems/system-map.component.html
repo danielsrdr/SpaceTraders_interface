@@ -1,251 +1,127 @@
 <div
-
   class="sk-system-layout"
-
   [class.sk-system-layout--terminal]="terminalOpen() && viewMode() === 'flight'"
-
   [class.sk-system-layout--surface]="viewMode() === 'surface' || viewMode() === 'launch'"
-
 >
-
   <main class="sk-system-canvas-col">
-
     <div class="sk-map-canvas relative h-full min-h-0 w-full">
-
       @if (viewMode() === 'flight' || viewMode() === 'landing') {
-
         <app-system-flight-view
-
           class="block h-full w-full"
-
           chromeMode="embedded"
-
           [planets]="planets()"
-
           [ships]="ships()"
-
           [systemSymbol]="systemSymbol()"
-
           [systemName]="systemData()?.name ?? systemSymbol()"
-
           [focusPlanetName]="focusPlanetName()"
-
           [focusShipSymbol]="focusShipSymbol()"
-
           [selectedShipSymbol]="selectedShip()?.symbol ?? null"
-
           [selectedShipRole]="selectedShip()?.registration?.role ?? null"
-
           [selectedShip]="selectedShip()"
-
           [selectedCargo]="shipCargo()"
-
           [landingPlanet]="landingPlanet()"
-
           [landingActive]="viewMode() === 'landing'"
-
           [launchHandoff]="launchHandoffActive()"
-
           [actionPulse]="actionPulse()"
-
           [contractWaypoints]="contractWaypoints()"
-
           [replayVoyage]="replayVoyage()"
-
           [ghostShips]="ghostShipsOnMap()"
-
           (planetClick)="onPlanetClick($event)"
-
           (shipClick)="selectShip($event)"
-
           (landingComplete)="onLandingComplete()"
-
           (replayExit)="onReplayExit()"
-
         />
-
       }
 
       @if ((viewMode() === 'surface' || viewMode() === 'launch') && selectedPlanet(); as planet) {
-
         <app-planet-surface-view
-
           class="block h-full w-full"
-
           [planet]="planet"
-
           [launchActive]="viewMode() === 'launch'"
-
           [marketPending]="pendingMarketOpen()"
-
           [entryActive]="surfaceEntryActive()"
-
           [market]="market()"
-
           [shipyard]="shipyard()"
-
           [captain]="surfaceCaptain()"
-
           [contractBeacons]="surfaceContractBeacons()"
-
           [scanDeposits]="surfaceScanDeposits()"
-
           [boardingShip]="surfaceBoardingShip()"
-
           (zoneInteract)="onSurfaceZoneInteract($event)"
-
           (contractDeliver)="onSurfaceContractDeliver($event)"
-
           (oreBroken)="onSurfaceOreBroken($event)"
-
           (cartDelivered)="onSurfaceCartDelivered()"
-
           (ruinsScanned)="onSurfaceRuinsScanned()"
-
           (caveMapped)="onSurfaceCaveMapped($event)"
-
           (marketTrade)="onSurfaceMarketTrade($event)"
-
           (exitSurface)="onExitSurface()"
-
           (launchComplete)="onLaunchComplete()"
-
           (entryComplete)="onSurfaceEntryComplete()"
-
         />
-
       }
-
     </div>
 
-
-
     <div class="sk-canvas-chrome" aria-label="Canvas shortcuts">
-
       <div class="sk-canvas-chrome-top sk-system-top-chrome">
-
         @if (viewMode() === 'flight' || viewMode() === 'landing') {
-
           <app-system-sidebar
-
             [searchQuery]="searchQuery()"
-
             [shipEtaFn]="shipEtaFn"
-
             (marketSearch)="onMarketSearch($event)"
-
             (shareSpectator)="shareSpectatorLink()"
-
             (openPostcard)="openPostcard()"
-
             (openTravel)="openTravelModal($event.planet, $event.intent)"
-
             (selectShip)="selectShip($event)"
-
           />
-
         }
 
         @if (showReopenTerminal()) {
-
           <button
-
             type="button"
-
             class="sk-btn sk-canvas-terminal pointer-events-auto flex items-center gap-2 px-3 py-2 text-xs"
-
             aria-label="Open cockpit terminal"
-
             (click)="openTerminal()"
-
           >
-
             <span class="tracking-widest uppercase">Terminal</span>
-
           </button>
-
         }
-
       </div>
-
     </div>
-
   </main>
 
-
-
   @if (terminalOpen() && viewMode() === 'flight') {
-
     <aside class="sk-system-terminal-col">
-
       <app-system-cockpit-terminal
-
         (close)="onTerminalClose()"
-
         (openTravel)="openTravelModal($event.planet, $event.intent)"
-
       />
-
     </aside>
-
   }
-
 </div>
 
-
-
 <app-travel-modal
-
   [open]="travelModalOpen()"
-
   [target]="travelModalTarget()"
-
   [intent]="travelIntent()"
-
   [ships]="travelModalShips()"
-
   [selectedShipSymbol]="travelModalShipSymbol()"
-
   [flightMode]="flightMode()"
-
   [executing]="travelExecuting()"
-
   [route]="travelRoute()"
-
   (shipSymbolChange)="onTravelShipChange($event)"
-
   (flightModeChange)="flightMode.set($event)"
-
   (confirm)="onTravelConfirm()"
-
   (cancel)="closeTravelModal()"
-
 />
-
-
 
 <app-postcard-dialog [options]="postcardOptions()" (close)="closePostcard()" />
 
-
-
 @if (marketOverlayOpen() && market(); as m) {
-
   <app-market-overlay
-
     [market]="m"
-
     [selectedPlanet]="selectedPlanet()"
-
-    [dockedAt]="selectedPlanet() ? dockedAt(selectedPlanet()!.name) : []"
-
+    [dockedAt]="dockedAtSelected()"
     [cargoUnitsOf]="cargoUnitsOfFn"
-
     [maxCargoProceeds]="maxCargoProceeds()"
-
     (close)="closeMarketOverlay()"
-
   />
-
 }
-
-

@@ -8,7 +8,9 @@ import {
   shipFlightModeClass,
   shipInOrbit,
   shipInSystem,
+  shipsDockedAt,
   shipStatusClass,
+  terminalShipFor,
 } from '../../planet-helpers';
 import { ShipActionsService } from '../../ship-actions.service';
 import { SystemMapStore } from '../../system-map.store';
@@ -38,12 +40,17 @@ export class CockpitNavTabComponent {
   readonly supplyMaterial = this.shipActions.supplyMaterial;
   readonly supplyUnits = this.shipActions.supplyUnits;
 
-  readonly terminalShip = computed(() => {
-    const ship = this.selectedShip();
-    if (ship) return ship;
+  readonly terminalShip = computed(() =>
+    terminalShipFor(this.selectedShip(), this.selectedPlanet(), this.ships()),
+  );
+
+  readonly shipsThatCanNavigate = computed(() => {
     const planet = this.selectedPlanet();
-    if (!planet) return null;
-    return this.ships().find((s) => s.nav.waypointSymbol === planet.name) ?? null;
+    if (!planet) return [];
+    return this.ships().filter(
+      (s) =>
+        shipInSystem(s, planet.system) && shipInOrbit(s) && s.nav.waypointSymbol !== planet.name,
+    );
   });
 
   readonly flightModes = FLIGHT_MODES;
@@ -59,18 +66,7 @@ export class CockpitNavTabComponent {
   }
 
   dockedAt(waypointSymbol: string) {
-    return this.ships().filter(
-      (s) => s.nav.waypointSymbol === waypointSymbol && s.nav.status === 'DOCKED',
-    );
-  }
-
-  shipsThatCanNavigate(planet: PlanetView) {
-    return this.ships().filter(
-      (s) =>
-        shipInSystem(s, planet.system) &&
-        shipInOrbit(s) &&
-        s.nav.waypointSymbol !== planet.name,
-    );
+    return shipsDockedAt(this.ships(), waypointSymbol);
   }
 
   setFlightMode(shipSymbol: string): void {

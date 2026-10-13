@@ -1,5 +1,6 @@
 import { Component, computed, inject } from '@angular/core';
 import { CockpitLogService } from '../../cockpit-log.service';
+import { terminalShipFor } from '../../planet-helpers';
 import { ShipActionsService } from '../../ship-actions.service';
 import { SystemMapStore } from '../../system-map.store';
 
@@ -20,13 +21,9 @@ export class CockpitScanTabComponent {
   readonly surfaceScanResults = this.shipActions.surfaceScanResults;
   readonly shipSurveys = this.shipActions.shipSurveys;
 
-  readonly terminalShip = computed(() => {
-    const ship = this.selectedShip();
-    if (ship) return ship;
-    const planet = this.selectedPlanet();
-    if (!planet) return null;
-    return this.ships().find((s) => s.nav.waypointSymbol === planet.name) ?? null;
-  });
+  readonly terminalShip = computed(() =>
+    terminalShipFor(this.selectedShip(), this.selectedPlanet(), this.ships()),
+  );
 
   actionLoading(key: string): boolean {
     return this.cockpitLog.actionLoading(key);
@@ -67,7 +64,9 @@ export class CockpitScanTabComponent {
   formatSurfaceDeposit(deposit: unknown): string {
     if (deposit && typeof deposit === 'object' && 'symbol' in deposit) {
       const d = deposit as { symbol?: string; size?: number; type?: string };
-      return [d.symbol, d.type, d.size != null ? `size ${d.size}` : null].filter(Boolean).join(' · ');
+      return [d.symbol, d.type, d.size != null ? `size ${d.size}` : null]
+        .filter(Boolean)
+        .join(' · ');
     }
     return String(deposit);
   }

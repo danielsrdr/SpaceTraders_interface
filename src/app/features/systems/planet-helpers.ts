@@ -1,5 +1,17 @@
-import { PlanetView, MapLayout, canvasPosition, Position } from '../../models/system.model';
-import { CargoItem, ShipCargo, ShipData, ShipNavRoute, ShipNavRouteWaypoint } from '../../models/ship.model';
+import {
+  PlanetView,
+  MapLayout,
+  MarketData,
+  canvasPosition,
+  Position,
+} from '../../models/system.model';
+import {
+  CargoItem,
+  ShipCargo,
+  ShipData,
+  ShipNavRoute,
+  ShipNavRouteWaypoint,
+} from '../../models/ship.model';
 
 const TYPE_IMAGES: Record<string, string[]> = {
   PLANET: ['PLANET.png'],
@@ -8,7 +20,13 @@ const TYPE_IMAGES: Record<string, string[]> = {
   ORBITAL_STATION: ['FUEL_STATION.png'],
   JUMP_GATE: ['jumpgate.png'],
   ASTEROID: ['asteroid1.png', 'asteroid2.png', 'asteroid3.png', 'asteroid4.png'],
-  ASTEROID_FIELD: ['ASTEROID_FIELD.png', 'asteroid1.png', 'asteroid2.png', 'asteroid3.png', 'asteroid4.png'],
+  ASTEROID_FIELD: [
+    'ASTEROID_FIELD.png',
+    'asteroid1.png',
+    'asteroid2.png',
+    'asteroid3.png',
+    'asteroid4.png',
+  ],
   ASTEROID_BASE: ['ASTEROID_BASE.png'],
   ENGINEERED_ASTEROID: ['ENGINEERED_ASTEROID.png'],
   NEBULA: ['GAS_GIANT.png'],
@@ -123,13 +141,18 @@ export function formatPlanetInfo(planet: PlanetView): string {
   return `${planet.name}\nType: ${planet.type}\nFaction: ${faction}\nTraits: ${traits}\nCharted: ${charted}\nConstruction: ${construction}`;
 }
 
-export function formatTradeGoods(goods: Array<{ symbol: string; purchasePrice?: number; sellPrice?: number }>, label: string): string {
+export function formatTradeGoods(
+  goods: Array<{ symbol: string; purchasePrice?: number; sellPrice?: number }>,
+  label: string,
+): string {
   if (!goods.length) return `${label}: none`;
   const lines = goods.map((g) => {
     const prices = [
       g.purchasePrice != null ? `buy ${g.purchasePrice}` : null,
       g.sellPrice != null ? `sell ${g.sellPrice}` : null,
-    ].filter(Boolean).join(', ');
+    ]
+      .filter(Boolean)
+      .join(', ');
     return `  ${g.symbol}${prices ? ` (${prices})` : ''}`;
   });
   return `${label}:\n${lines.join('\n')}`;
@@ -146,7 +169,11 @@ export function getShipDisplayScale(coordScale: number): number {
   return targetPx;
 }
 
-export function shipOrbitOffset(index: number, total: number, radius = 18): { x: number; y: number } {
+export function shipOrbitOffset(
+  index: number,
+  total: number,
+  radius = 18,
+): { x: number; y: number } {
   if (total <= 1) return { x: 0, y: radius * 0.6 };
   const angle = (2 * Math.PI * index) / total - Math.PI / 2;
   return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
@@ -158,8 +185,44 @@ export function shipsInSystem(ships: ShipData[], systemSymbol: string): ShipData
 
 export function shipsOnMap(ships: ShipData[], systemSymbol: string): ShipData[] {
   return ships.filter(
-    (ship) => shipInSystem(ship, systemSymbol) || (shipInTransit(ship) && transitInSystem(ship, systemSymbol)),
+    (ship) =>
+      shipInSystem(ship, systemSymbol) ||
+      (shipInTransit(ship) && transitInSystem(ship, systemSymbol)),
   );
+}
+
+export function terminalShipFor(
+  selectedShip: ShipData | null,
+  selectedPlanet: PlanetView | null,
+  ships: ShipData[],
+): ShipData | null {
+  if (selectedShip) return selectedShip;
+  if (!selectedPlanet) return null;
+  return ships.find((s) => s.nav.waypointSymbol === selectedPlanet.name) ?? null;
+}
+
+export function shipsDockedAt(ships: ShipData[], waypointSymbol: string): ShipData[] {
+  return ships.filter((s) => s.nav.waypointSymbol === waypointSymbol && s.nav.status === 'DOCKED');
+}
+
+export function shipsForWaypoint(ships: ShipData[], planet: PlanetView): ShipData[] {
+  return ships.filter(
+    (s) => s.nav.systemSymbol === planet.system && s.nav.waypointSymbol === planet.name,
+  );
+}
+
+export function cargoUnitsOf(cargo: ShipCargo | null, symbol: string): number {
+  if (!cargo) return 0;
+  return cargo.inventory.find((item) => item.symbol === symbol)?.units ?? 0;
+}
+
+export function maxCargoProceeds(market: MarketData | null, cargo: ShipCargo | null): number {
+  if (!market?.tradeGoods || !cargo) return 0;
+  let max = 0;
+  for (const good of market.tradeGoods) {
+    max = Math.max(max, cargoUnitsOf(cargo, good.symbol) * good.sellPrice);
+  }
+  return max;
 }
 
 export function findPlanetForShip(planets: PlanetView[], ship: ShipData): PlanetView | undefined {
@@ -308,10 +371,7 @@ export function routeWaypointCanvasPosition(
   return canvasPosition({ x: waypoint.x, y: waypoint.y }, layout);
 }
 
-export function transitCanvasPosition(
-  ship: ShipData,
-  layout: MapLayout,
-): Position | null {
+export function transitCanvasPosition(ship: ShipData, layout: MapLayout): Position | null {
   const route = ship.nav.route;
   if (!route || !shipInTransit(ship)) return null;
 
@@ -353,9 +413,7 @@ export function formatTransitInfo(ship: ShipData): string {
 }
 
 export function formatShipInfo(ship: ShipData): string {
-  const cargo = ship.cargo
-    ? `Cargo: ${ship.cargo.units}/${ship.cargo.capacity}`
-    : 'Cargo: unknown';
+  const cargo = ship.cargo ? `Cargo: ${ship.cargo.units}/${ship.cargo.capacity}` : 'Cargo: unknown';
   const transit = formatTransitInfo(ship);
   const lines = [
     `${ship.symbol}`,
@@ -425,16 +483,10 @@ function pickShipForPlanetAction(
   selectedShip: ShipData | null,
   ships: ShipData[],
 ): ShipData | null {
-  if (
-    selectedShip &&
-    shipInSystem(selectedShip, planet.system) &&
-    !shipInTransit(selectedShip)
-  ) {
+  if (selectedShip && shipInSystem(selectedShip, planet.system) && !shipInTransit(selectedShip)) {
     return selectedShip;
   }
-  const candidates = ships.filter(
-    (s) => shipInSystem(s, planet.system) && !shipInTransit(s),
-  );
+  const candidates = ships.filter((s) => shipInSystem(s, planet.system) && !shipInTransit(s));
   if (candidates.length === 1) return candidates[0]!;
   return null;
 }

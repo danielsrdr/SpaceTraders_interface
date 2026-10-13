@@ -94,9 +94,9 @@
     <button type="button" class="sk-btn w-full" (click)="openTravel()(planet, 'visit')">
       Plot course
     </button>
-    @if (shipsThatCanNavigate(planet).length) {
+    @if (shipsThatCanNavigate().length) {
       <p class="sk-crt-section-label mt-3">Quick move</p>
-      @for (s of shipsThatCanNavigate(planet); track s.symbol) {
+      @for (s of shipsThatCanNavigate(); track s.symbol) {
         <div class="sk-crt-row mb-1">
           <span class="flex-1 truncate text-xs">{{ s.symbol }}</span>
           <button

@@ -41,7 +41,8 @@ export class SystemSidebarComponent {
     return name.length > 8 ? name.slice(0, 7) + '…' : name;
   });
 
-  readonly fleetCount = computed(() => shipsOnMap(this.ships(), this.systemSymbol()).length);
+  readonly systemShips = computed(() => shipsOnMap(this.ships(), this.systemSymbol()));
+  readonly fleetCount = computed(() => this.systemShips().length);
 
   readonly ghostShipsOnMap = computed(() =>
     this.ghostFleet.enabled() ? this.ghostFleet.ghostsForSystem(this.systemSymbol()) : [],
@@ -51,7 +52,6 @@ export class SystemSidebarComponent {
     filterMarketWaypoints(this.planets(), this.searchQuery()),
   );
 
-  readonly shipsOnMap = shipsOnMap;
   readonly shipInTransit = shipInTransit;
   readonly shipStatusClass = shipStatusClass;
 

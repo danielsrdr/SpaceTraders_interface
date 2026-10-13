@@ -13,7 +13,7 @@ import {
 import { FleetStore } from '../../../core/state/fleet.store';
 import { ShipData } from '../../../models/ship.model';
 import { hasTrait, PlanetView } from '../../../models/system.model';
-import { resolveWaypointType } from '../planet-helpers';
+import { resolveWaypointType, terminalShipFor } from '../planet-helpers';
 import { CockpitLogService } from '../cockpit-log.service';
 import { ShipActionsService } from '../ship-actions.service';
 import { SystemMapStore } from '../system-map.store';
@@ -46,13 +46,9 @@ export class SystemCockpitTerminalComponent implements OnInit {
 
   readonly terminalOpen = computed(() => !!this.selectedPlanet() || !!this.selectedShip());
 
-  readonly terminalShip = computed<ShipData | null>(() => {
-    const ship = this.selectedShip();
-    if (ship) return ship;
-    const planet = this.selectedPlanet();
-    if (!planet) return null;
-    return this.mapStore.ships().find((s) => s.nav.waypointSymbol === planet.name) ?? null;
-  });
+  readonly terminalShip = computed<ShipData | null>(() =>
+    terminalShipFor(this.selectedShip(), this.selectedPlanet(), this.mapStore.ships()),
+  );
 
   readonly terminalTitle = computed(
     () => this.selectedPlanet()?.name ?? this.selectedShip()?.symbol ?? 'TERMINAL',
@@ -68,9 +64,7 @@ export class SystemCockpitTerminalComponent implements OnInit {
 
   readonly logLinesReversed = computed(() => [...this.logLines()].reverse());
 
-  readonly activeTabComponent = computed(
-    () => this.tabComponentTypes()[this.cockpitTab()] ?? null,
-  );
+  readonly activeTabComponent = computed(() => this.tabComponentTypes()[this.cockpitTab()] ?? null);
 
   readonly tabInputs = computed(() => {
     if (this.cockpitTab() === 'nav') {

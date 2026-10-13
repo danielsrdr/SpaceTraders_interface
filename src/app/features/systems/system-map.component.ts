@@ -19,10 +19,14 @@ import { hasTrait, PlanetView } from '../../models/system.model';
 import { PageBackgroundService } from '../../shared/services/page-background.service';
 import { SnackbarService } from '../../shared/services/snackbar.service';
 import {
+  cargoUnitsOf,
   formatRouteEta,
+  maxCargoProceeds,
   shipAtWaypoint,
   shipDocked,
   shipInTransit,
+  shipsDockedAt,
+  shipsForWaypoint,
   shipsOnMap,
 } from './planet-helpers';
 import { PlanetSurfaceViewComponent } from './planet-surface-view.component';
@@ -145,7 +149,7 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly surfaceBoardingShip = computed(() => {
     const planet = this.selectedPlanet();
     if (!planet) return null;
-    const docked = this.shipsForWaypoint(planet).filter((s) => shipDocked(s));
+    const docked = shipsForWaypoint(this.ships(), planet).filter((s) => shipDocked(s));
     if (!docked.length) return null;
     const selected = this.selectedShip();
     if (selected && shipDocked(selected) && shipAtWaypoint(selected, planet.name)) {
@@ -180,25 +184,18 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
   });
 
   readonly terminalOpen = computed(
-    () =>
-      this.terminalVisible() && (!!this.selectedPlanet() || !!this.selectedShip()),
+    () => this.terminalVisible() && (!!this.selectedPlanet() || !!this.selectedShip()),
   );
 
   readonly showReopenTerminal = computed(
-    () =>
-      !this.terminalVisible() && (!!this.selectedPlanet() || !!this.selectedShip()),
+    () => !this.terminalVisible() && (!!this.selectedPlanet() || !!this.selectedShip()),
   );
 
-  readonly maxCargoProceeds = computed(() => {
-    const market = this.market();
-    const cargo = this.shipCargo();
-    if (!market?.tradeGoods || !cargo) return 0;
-    let max = 0;
-    for (const good of market.tradeGoods) {
-      const held = cargo.inventory.find((item) => item.symbol === good.symbol)?.units ?? 0;
-      max = Math.max(max, held * good.sellPrice);
-    }
-    return max;
+  readonly maxCargoProceeds = computed(() => maxCargoProceeds(this.market(), this.shipCargo()));
+
+  readonly dockedAtSelected = computed(() => {
+    const planet = this.selectedPlanet();
+    return planet ? shipsDockedAt(this.ships(), planet.name) : [];
   });
 
   readonly formatRouteEta = formatRouteEta;
@@ -206,7 +203,7 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly shipsOnMap = shipsOnMap;
   readonly flightModes = FLIGHT_MODES;
 
-  readonly cargoUnitsOfFn = (symbol: string): number => this.cargoUnitsOf(symbol);
+  readonly cargoUnitsOfFn = (symbol: string): number => cargoUnitsOf(this.shipCargo(), symbol);
   readonly shipEtaFn = (ship: ShipData): string => this.shipEta(ship);
 
   ngOnInit(): void {
@@ -237,12 +234,6 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.mapStore.stopTransitPolling();
-  }
-
-  cargoUnitsOf(symbol: string): number {
-    const cargo = this.shipCargo();
-    if (!cargo) return 0;
-    return cargo.inventory.find((item) => item.symbol === symbol)?.units ?? 0;
   }
 
   onMarketSearch(event: Event): void {
@@ -371,9 +362,7 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.travelExecuting.set(true);
     this.fleetStore.selectShip(ship);
-    this.pendingMarketOpen.set(
-      this.travelIntent() === 'market' && hasTrait(planet, 'MARKETPLACE'),
-    );
+    this.pendingMarketOpen.set(this.travelIntent() === 'market' && hasTrait(planet, 'MARKETPLACE'));
     this.travelModalOpen.set(false);
     this.travelModalTarget.set(null);
     this.snackbar.show(`${shipSymbol} en route to ${planet.name}`, 'success');
@@ -464,7 +453,11 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.surfaceBridge.onSurfaceContractDeliver(beacon);
   }
 
-  onSurfaceMarketTrade(event: { symbol: string; mode: 'buy' | 'sell'; units: number }): Promise<void> {
+  onSurfaceMarketTrade(event: {
+    symbol: string;
+    mode: 'buy' | 'sell';
+    units: number;
+  }): Promise<void> {
     return this.surfaceBridge.onSurfaceMarketTrade(event);
   }
 
@@ -474,7 +467,7 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
     this.terminalVisible.set(true);
     this.shipActions.detailPanel.set('info');
     this.shipActions.clearDetailData();
-    this.pushLog('UPLINK · ' + ship.symbol + ' ONLINE');
+    this.cockpitLog.pushLog('UPLINK · ' + ship.symbol + ' ONLINE');
     this.flightMode.set((ship.nav.flightMode as ShipNavFlightMode) || 'CRUISE');
     this.focusShipSymbol.set(ship.symbol);
 
@@ -502,7 +495,11 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
   onFleetKeydown(event: KeyboardEvent): void {
     if (this.viewMode() !== 'flight') return;
     const target = event.target as HTMLElement;
-    if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA') {
+    if (
+      target.tagName === 'INPUT' ||
+      target.tagName === 'SELECT' ||
+      target.tagName === 'TEXTAREA'
+    ) {
       return;
     }
     if (event.key >= '1' && event.key <= '9') {
@@ -523,25 +520,9 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  dockedAt(waypointSymbol: string): ShipData[] {
-    return this.ships().filter(
-      (s) => s.nav.waypointSymbol === waypointSymbol && s.nav.status === 'DOCKED',
-    );
-  }
-
-  shipsForWaypoint(planet: PlanetView): ShipData[] {
-    return this.ships().filter(
-      (s) => s.nav.systemSymbol === planet.system && s.nav.waypointSymbol === planet.name,
-    );
-  }
-
   shipEta(ship: ShipData): string {
     this.transitTick();
     return formatRouteEta(ship.nav.route);
-  }
-
-  pushLog(text: string, tone: 'info' | 'success' | 'error' = 'info'): void {
-    this.cockpitLog.pushLog(text, tone);
   }
 
   onReplayExit(): void {
@@ -570,7 +551,10 @@ export class SystemMapComponent implements OnInit, AfterViewInit, OnDestroy {
     await this.loadShips();
     const planet = this.planets().find((p) => p.name === travelTo);
     if (!planet) {
-      this.snackbar.show(`Destination ${travelTo} not charted in ${this.systemSymbol()}`, 'warning');
+      this.snackbar.show(
+        `Destination ${travelTo} not charted in ${this.systemSymbol()}`,
+        'warning',
+      );
       return;
     }
     this.openTravelModal(planet, 'visit');

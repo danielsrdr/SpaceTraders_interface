@@ -1,5 +1,6 @@
 import { Component, computed, inject } from '@angular/core';
 import { CockpitLogService } from '../../cockpit-log.service';
+import { terminalShipFor } from '../../planet-helpers';
 import { ShipActionsService } from '../../ship-actions.service';
 import { SystemMapStore } from '../../system-map.store';
 
@@ -18,13 +19,9 @@ export class CockpitGateTabComponent {
   readonly jumpGate = this.shipActions.jumpGate;
   readonly jumpTarget = this.shipActions.jumpTarget;
 
-  readonly terminalShip = computed(() => {
-    const ship = this.selectedShip();
-    if (ship) return ship;
-    const planet = this.selectedPlanet();
-    if (!planet) return null;
-    return this.ships().find((s) => s.nav.waypointSymbol === planet.name) ?? null;
-  });
+  readonly terminalShip = computed(() =>
+    terminalShipFor(this.selectedShip(), this.selectedPlanet(), this.ships()),
+  );
 
   actionLoading(key: string): boolean {
     return this.cockpitLog.actionLoading(key);
