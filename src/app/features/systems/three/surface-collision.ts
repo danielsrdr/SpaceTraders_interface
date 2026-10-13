@@ -1,4 +1,3 @@
-import { InstancedMesh, Mesh, Object3D } from 'three';
 import { TerrainHeightField, WORLD_RADIUS } from './terrain/terrain-height';
 import { MineTunnelManager } from './mine/mine-tunnel.manager';
 import type { CaveConfig, CaveTunnelManager } from './cave/cave-tunnel.manager';
@@ -15,13 +14,7 @@ export interface SurfaceCollision {
    * `(x, z)` hits a registered collider. Callers pass `lowerY = feet + step`
    * so low, steppable obstacles do not block.
    */
-  blocksCapsuleBody(
-    x: number,
-    z: number,
-    radius: number,
-    lowerY: number,
-    upperY: number,
-  ): boolean;
+  blocksCapsuleBody(x: number, z: number, radius: number, lowerY: number, upperY: number): boolean;
   /** Highest collider top no higher than `maxTopY` to stand on / step onto. */
   supportHeight(x: number, z: number, radius: number, maxTopY: number): number;
   /** Lowest collider base above `aboveY` to clamp the head against. */
@@ -138,12 +131,4 @@ export function isSteepTerrainBlocked(
     minGround = Math.min(minGround, h);
   }
   return maxGround - minGround > 1.8 && y - 1.7 < maxGround;
-}
-
-export function disposeSurfaceWorld(root: Object3D): void {
-  root.traverse((child) => {
-    if (child instanceof Mesh || child instanceof InstancedMesh) {
-      if (child.geometry) child.geometry.dispose();
-    }
-  });
 }

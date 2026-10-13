@@ -20,10 +20,22 @@ export interface SurfaceZone {
 
 export function isInZone(x: number, y: number, z: number, zone: SurfaceZone): boolean {
   const { aabb } = zone;
-  return x >= aabb.minX && x <= aabb.maxX && y >= aabb.minY && y <= aabb.maxY && z >= aabb.minZ && z <= aabb.maxZ;
+  return (
+    x >= aabb.minX &&
+    x <= aabb.maxX &&
+    y >= aabb.minY &&
+    y <= aabb.maxY &&
+    z >= aabb.minZ &&
+    z <= aabb.maxZ
+  );
 }
 
-export function getActiveZone(x: number, y: number, z: number, zones: SurfaceZone[]): SurfaceZone | null {
+export function getActiveZone(
+  x: number,
+  y: number,
+  z: number,
+  zones: SurfaceZone[],
+): SurfaceZone | null {
   for (const zone of zones) {
     if (isInZone(x, y, z, zone)) return zone;
   }
@@ -83,19 +95,4 @@ export function buildProceduralSurfaceZones(
     pois.push({ kind: 'mine', label: 'Mine', position: poi.mine, priority: 70 });
   }
   return buildSurfaceZones(pois);
-}
-
-/** @deprecated Use buildSurfaceZones */
-export function buildSurfaceZonesLegacy(
-  hasMarket: boolean,
-  hasMine: boolean,
-): SurfaceZone[] {
-  return buildProceduralSurfaceZones(hasMarket, hasMine, {
-    market: hasMarket ? { x: 8, z: 8 } : null,
-    mine: hasMine ? { x: -12, z: -10 } : null,
-    shipyard: null,
-    ruins: null,
-    depot: null,
-    cave: null,
-  });
 }

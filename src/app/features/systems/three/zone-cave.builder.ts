@@ -1,5 +1,5 @@
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial, PointLight } from 'three';
-import type { SurfaceCollider } from './surface-collider-registry';
+import { boxCollider, type SurfaceCollider } from './surface-collider-registry';
 
 export interface CaveBuildResult {
   group: Group;
@@ -40,17 +40,7 @@ export function buildCaveStructuresAt(x: number, z: number, baseY: number): Cave
   glow.userData['nightLight'] = glow.intensity;
   group.add(glow);
 
-  const colliders: SurfaceCollider[] = [
-    {
-      kind: 'box',
-      minX: x - 3,
-      maxX: x + 3,
-      minZ: z - 2.5,
-      maxZ: z + 2.5,
-      baseY,
-      topY: baseY + 3.2,
-    },
-  ];
+  const colliders: SurfaceCollider[] = [boxCollider(x, z, baseY, -3, 3, -2.5, 2.5, 3.2)];
 
   return { group, colliders };
 }

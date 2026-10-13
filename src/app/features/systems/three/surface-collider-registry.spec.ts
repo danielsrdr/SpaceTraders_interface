@@ -1,4 +1,5 @@
 import {
+  boxCollider,
   createSurfaceColliderRegistry,
   horizontalOverlap,
   type SurfaceCollider,
@@ -24,6 +25,20 @@ function cylinder(
 ): SurfaceCollider {
   return { kind: 'cylinder', x, z, radius, baseY, topY };
 }
+
+describe('boxCollider', () => {
+  it('offsets the footprint by the origin and lifts topY by the height', () => {
+    expect(boxCollider(10, 20, 5, -3, 3, -2.5, 2.5, 3.2)).toEqual({
+      kind: 'box',
+      minX: 7,
+      maxX: 13,
+      minZ: 17.5,
+      maxZ: 22.5,
+      baseY: 5,
+      topY: 8.2,
+    });
+  });
+});
 
 describe('horizontalOverlap', () => {
   it('detects a disc overlapping a box (including the radius margin)', () => {
