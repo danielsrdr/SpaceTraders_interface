@@ -1,14 +1,6 @@
-import {
-  BoxGeometry,
-  Color,
-  Group,
-  Mesh,
-  MeshStandardMaterial,
-  PointLight,
-  Vector3,
-} from 'three';
+import { BoxGeometry, Color, Group, Mesh, MeshStandardMaterial, PointLight, Vector3 } from 'three';
 import type { MarketData, TradeGoodType } from '../../../models/system.model';
-import type { SurfaceCollider } from './surface-collider-registry';
+import { boxCollider, type SurfaceCollider } from './surface-collider-registry';
 
 export interface MarketClerkAnchor {
   position: Vector3;
@@ -58,15 +50,7 @@ function wallCollider(
   maxZ: number,
   topY: number,
 ): void {
-  colliders.push({
-    kind: 'box',
-    minX: originX + minX,
-    maxX: originX + maxX,
-    minZ: originZ + minZ,
-    maxZ: originZ + maxZ,
-    baseY: groundY,
-    topY: groundY + topY,
-  });
+  colliders.push(boxCollider(originX, originZ, groundY, minX, maxX, minZ, maxZ, topY));
 }
 
 /** Enclosed trading post with a single clerk behind the counter — no floating stall sprites. */
@@ -132,10 +116,28 @@ function marketGroup(
   );
 
   // Roof with slight overhang
-  addBox(group, BUILDING_W + 0.8, 0.35, BUILDING_D + 0.8, BUILDING_W / 2, WALL_H + 0.15, BUILDING_D / 2, roofMat);
+  addBox(
+    group,
+    BUILDING_W + 0.8,
+    0.35,
+    BUILDING_D + 0.8,
+    BUILDING_W / 2,
+    WALL_H + 0.15,
+    BUILDING_D / 2,
+    roofMat,
+  );
 
   // Trim band + sign panel above door (mesh, not billboard)
-  const sign = addBox(group, 3.2, 0.55, 0.12, BUILDING_W / 2, WALL_H - 0.35, BUILDING_D - 0.05, trimMat);
+  const sign = addBox(
+    group,
+    3.2,
+    0.55,
+    0.12,
+    BUILDING_W / 2,
+    WALL_H - 0.35,
+    BUILDING_D - 0.05,
+    trimMat,
+  );
   sign.userData['nightGlow'] = 0.35;
 
   // Counter spanning interior
@@ -264,14 +266,4 @@ export function isNearMarketClerk(
   const dx = cx - clerk.position.x;
   const dz = cz - clerk.position.z;
   return dx * dx + dz * dz <= CLERK_INTERACT_SQ;
-}
-
-/** @deprecated Mine surface props are built via mine-pit.builder */
-export function buildMineStructuresAt(_originX: number, _originZ: number): Group {
-  return new Group();
-}
-
-/** @deprecated */
-export function buildMineStructures(): Group {
-  return new Group();
 }

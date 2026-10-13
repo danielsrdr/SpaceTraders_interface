@@ -13,14 +13,14 @@ export interface SurfaceContractBeacon {
   label: string;
 }
 
-function unitsRemaining(deliverable: {
-  unitsRequired: number;
-  unitsFulfilled?: number;
-}): number {
+function unitsRemaining(deliverable: { unitsRequired: number; unitsFulfilled?: number }): number {
   return deliverable.unitsRequired - (deliverable.unitsFulfilled ?? 0);
 }
 
-function poiForKind(pois: SurfacePoiDefinition[], kind: SurfaceZoneKind): SurfacePoiDefinition | null {
+function poiForKind(
+  pois: SurfacePoiDefinition[],
+  kind: SurfaceZoneKind,
+): SurfacePoiDefinition | null {
   return pois.find((p) => p.kind === kind) ?? null;
 }
 
@@ -113,8 +113,6 @@ export function beaconPositionForPoi(
       return { x: x + 1, y: baseY + 0.5, z: z + 1 };
     case 'ruins':
       return { x, y: baseY + 0.4, z };
-    case 'cave':
-      return { x, y: baseY + 0.5, z };
     default:
       return { x, y: baseY + 0.5, z };
   }

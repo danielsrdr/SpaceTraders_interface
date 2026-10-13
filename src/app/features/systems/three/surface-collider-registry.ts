@@ -31,6 +31,28 @@ export type SurfaceCollider =
       topY: number;
     };
 
+/** Box collider from an origin offset, ground height and height above ground. */
+export function boxCollider(
+  originX: number,
+  originZ: number,
+  groundY: number,
+  minX: number,
+  maxX: number,
+  minZ: number,
+  maxZ: number,
+  height: number,
+): SurfaceCollider {
+  return {
+    kind: 'box',
+    minX: originX + minX,
+    maxX: originX + maxX,
+    minZ: originZ + minZ,
+    maxZ: originZ + maxZ,
+    baseY: groundY,
+    topY: groundY + height,
+  };
+}
+
 export interface ColliderFootprint {
   minX: number;
   maxX: number;

@@ -1,18 +1,7 @@
-import {
-  BoxGeometry,
-  Color,
-  Group,
-  InstancedMesh,
-  Matrix4,
-  MeshStandardMaterial,
-} from 'three';
+import { BoxGeometry, Color, Group, InstancedMesh, Matrix4, MeshStandardMaterial } from 'three';
 import { PlanetView, hasTrait } from '../../../models/system.model';
-import {
-  isAsteroidWaypoint,
-  isGasGiantWaypoint,
-  resolveWaypointType,
-} from '../planet-helpers';
-import { buildMarketStructuresAt, buildMineStructuresAt } from './zone-buildings.builder';
+import { isAsteroidWaypoint, isGasGiantWaypoint, resolveWaypointType } from '../planet-helpers';
+import { buildMarketStructuresAt } from './zone-buildings.builder';
 import { buildProceduralSurfaceZones, SurfaceZone } from './surface-zones';
 import type { PoiPositions } from './surface-poi';
 
@@ -79,9 +68,7 @@ export class VoxelChunkManager {
     this.spawn = { x: 0, y: surfaceY + 2, z: 0 };
 
     this.poi = {
-      market: this.hasMarket
-        ? { x: 8 + (this.seed % 6), z: 8 + ((this.seed >> 3) % 6) }
-        : null,
+      market: this.hasMarket ? { x: 8 + (this.seed % 6), z: 8 + ((this.seed >> 3) % 6) } : null,
       mine: this.hasMine
         ? { x: -12 - ((this.seed >> 6) % 8), z: -10 - ((this.seed >> 10) % 8) }
         : null,
@@ -168,9 +155,6 @@ export class VoxelChunkManager {
   private buildPoiStructures(): void {
     if (this.poi.market) {
       this.root.add(buildMarketStructuresAt(this.poi.market.x, this.poi.market.z).group);
-    }
-    if (this.poi.mine) {
-      this.root.add(buildMineStructuresAt(this.poi.mine.x, this.poi.mine.z));
     }
   }
 
