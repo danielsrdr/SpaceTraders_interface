@@ -1,9 +1,6 @@
 <div class="sk-sidebar-dock pointer-events-auto">
   @if (systemData(); as system) {
-    <span
-      class="sk-sidebar-dock-system hidden sm:inline"
-      [title]="system.name ?? system.symbol"
-    >
+    <span class="sk-sidebar-dock-system hidden sm:inline" [title]="system.name ?? system.symbol">
       {{ systemLabel() }}
       <span class="text-white/40">· {{ planets().length }}</span>
     </span>
@@ -60,16 +57,24 @@
   <aside
     class="sk-crt sk-sidebar-panel pointer-events-auto"
     role="dialog"
-    [attr.aria-label]="panel === 'fleet' ? 'Fleet' : panel === 'find' ? 'Find market' : 'Operations'"
+    [attr.aria-label]="
+      panel === 'fleet' ? 'Fleet' : panel === 'find' ? 'Find market' : 'Operations'
+    "
     (click)="$event.stopPropagation()"
   >
     <div class="sk-crt-titlebar shrink-0">
       <span class="sk-crt-led"></span>
       <h2 class="m-0 flex-1 text-sm tracking-[0.2em] uppercase">
         @switch (panel) {
-          @case ('fleet') { Fleet }
-          @case ('find') { Find }
-          @case ('ops') { Ops }
+          @case ('fleet') {
+            Fleet
+          }
+          @case ('find') {
+            Find
+          }
+          @case ('ops') {
+            Ops
+          }
         }
       </h2>
       <button type="button" class="sk-btn px-2 py-1 text-xs" (click)="closePanel()">Close</button>
@@ -78,10 +83,10 @@
     <div class="sk-crt-body min-h-0 flex-1 overflow-y-auto">
       @switch (panel) {
         @case ('fleet') {
-          @if (shipsOnMap(ships(), systemSymbol()).length) {
+          @if (systemShips().length) {
             <p class="sk-crt-section-label">Ships in system · keys 1–9</p>
             <div class="flex flex-col gap-1">
-              @for (ship of shipsOnMap(ships(), systemSymbol()); track ship.symbol; let i = $index) {
+              @for (ship of systemShips(); track ship.symbol; let i = $index) {
                 <button
                   type="button"
                   class="sk-crt-row w-full flex-col items-start gap-0.5 text-left"
@@ -141,13 +146,23 @@
         }
         @case ('ops') {
           @if (systemData(); as system) {
-            <p class="sk-crt-section-label">{{ system.symbol }} · {{ planets().length }} waypoints</p>
+            <p class="sk-crt-section-label">
+              {{ system.symbol }} · {{ planets().length }} waypoints
+            </p>
           }
           <div class="sk-action-grid">
-            <button type="button" class="sk-btn flex-1 px-2 py-1.5 text-xs" (click)="shareSpectator.emit()">
+            <button
+              type="button"
+              class="sk-btn flex-1 px-2 py-1.5 text-xs"
+              (click)="shareSpectator.emit()"
+            >
               Share
             </button>
-            <button type="button" class="sk-btn flex-1 px-2 py-1.5 text-xs" (click)="openPostcard.emit()">
+            <button
+              type="button"
+              class="sk-btn flex-1 px-2 py-1.5 text-xs"
+              (click)="openPostcard.emit()"
+            >
               Postcard
             </button>
             <button

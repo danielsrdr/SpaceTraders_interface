@@ -1,12 +1,17 @@
 import { ShipNavRoute, ShipNavRouteWaypoint, ShipData } from '../../models/ship.model';
 import {
+  cargoUnitsOf,
   clearStableTransitProgress,
   evictStableTransitProgressOnRefresh,
   formatRouteEta,
   getStableTransitProgress,
   getTransitProgress,
+  maxCargoProceeds,
   resolveWaypointType,
   shipOrbitOffset,
+  shipsDockedAt,
+  shipsForWaypoint,
+  terminalShipFor,
 } from './planet-helpers';
 
 function ship(symbol: string, route: ShipNavRoute | undefined, status: string): ShipData {
@@ -150,5 +155,58 @@ describe('getStableTransitProgress', () => {
       arrival: new Date(10_000).toISOString(),
     };
     expect(getStableTransitProgress(ship('S1', legB, 'IN_TRANSIT'), 2500)).toBeCloseTo(0.25, 10);
+  });
+});
+
+describe('ship lookup helpers', () => {
+  const mk = (symbol: string, wp: string, status = 'DOCKED', sys = 'X1-A'): ShipData =>
+    ({ symbol, nav: { waypointSymbol: wp, systemSymbol: sys, status } }) as unknown as ShipData;
+  const a = mk('A', 'X1-A-1');
+  const b = mk('B', 'X1-A-1', 'IN_ORBIT');
+  const c = mk('C', 'X1-A-2');
+  const planet = { name: 'X1-A-1', system: 'X1-A' } as never;
+
+  it('terminalShipFor prefers selected ship, then ship at planet', () => {
+    expect(terminalShipFor(c, null, [a])).toBe(c);
+    expect(terminalShipFor(null, planet, [c, b])).toBe(b);
+    expect(terminalShipFor(null, null, [a])).toBeNull();
+    expect(terminalShipFor(null, planet, [c])).toBeNull();
+  });
+
+  it('shipsDockedAt only returns docked ships at the waypoint', () => {
+    expect(shipsDockedAt([a, b, c], 'X1-A-1')).toEqual([a]);
+  });
+
+  it('shipsForWaypoint matches system and waypoint', () => {
+    const other = mk('D', 'X1-A-1', 'DOCKED', 'X1-B');
+    expect(shipsForWaypoint([a, b, c, other], planet)).toEqual([a, b]);
+  });
+});
+
+describe('cargo helpers', () => {
+  const cargo = {
+    inventory: [
+      { symbol: 'IRON', units: 5 },
+      { symbol: 'GOLD', units: 2 },
+    ],
+  } as never;
+  const market = {
+    tradeGoods: [
+      { symbol: 'IRON', sellPrice: 10 },
+      { symbol: 'GOLD', sellPrice: 40 },
+      { symbol: 'X', sellPrice: 99 },
+    ],
+  } as never;
+
+  it('cargoUnitsOf returns held units or 0', () => {
+    expect(cargoUnitsOf(cargo, 'IRON')).toBe(5);
+    expect(cargoUnitsOf(cargo, 'NOPE')).toBe(0);
+    expect(cargoUnitsOf(null, 'IRON')).toBe(0);
+  });
+
+  it('maxCargoProceeds picks the best held good', () => {
+    expect(maxCargoProceeds(market, cargo)).toBe(80);
+    expect(maxCargoProceeds(null, cargo)).toBe(0);
+    expect(maxCargoProceeds(market, null)).toBe(0);
   });
 });

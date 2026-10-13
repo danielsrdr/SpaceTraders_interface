@@ -52,6 +52,15 @@ export class SurfaceMarketDialogComponent {
     return rows;
   });
 
+  readonly selectedListing = computed(() => {
+    const sym = this.selectedSymbol();
+    if (!sym) return null;
+    return this.listings().find((r) => r.symbol === sym) ?? null;
+  });
+
+  readonly canBuy = computed(() => this.selectedListing()?.purchasePrice != null);
+  readonly canSell = computed(() => this.selectedListing()?.sellPrice != null);
+
   readonly clerkTitle = computed(() => {
     const faction = this.planet()?.faction?.name;
     return faction ? `${faction} Exchange` : 'Surface Trading Post';
@@ -73,20 +82,6 @@ export class SurfaceMarketDialogComponent {
 
   adjustUnits(delta: number): void {
     this.units.update((u) => Math.max(1, u + delta));
-  }
-
-  canBuy(): boolean {
-    const sym = this.selectedSymbol();
-    if (!sym) return false;
-    const row = this.listings().find((r) => r.symbol === sym);
-    return row?.purchasePrice != null;
-  }
-
-  canSell(): boolean {
-    const sym = this.selectedSymbol();
-    if (!sym) return false;
-    const row = this.listings().find((r) => r.symbol === sym);
-    return row?.sellPrice != null;
   }
 
   submit(mode: 'buy' | 'sell'): void {

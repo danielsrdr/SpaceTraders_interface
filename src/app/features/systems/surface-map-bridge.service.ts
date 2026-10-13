@@ -15,6 +15,7 @@ import {
   shipAtWaypoint,
   shipDocked,
   shipInOrbit,
+  shipsForWaypoint,
 } from './planet-helpers';
 import { ShipActionsService } from './ship-actions.service';
 import { SystemMapStore } from './system-map.store';
@@ -52,7 +53,7 @@ export class SurfaceMapBridgeService {
     if (kind === 'ruins') return;
 
     if (kind === 'depot') {
-      const shipsHere = this.shipsForWaypoint(planet);
+      const shipsHere = shipsForWaypoint(this.mapStore.ships(), planet);
       const ship = shipsHere.find((s) => shipDocked(s)) ?? shipsHere[0];
       if (!ship) {
         this.snackbar.show('Dock a ship at this waypoint to refuel', 'error');
@@ -116,7 +117,9 @@ export class SurfaceMapBridgeService {
     if (!planet) return;
     this.progression.recordRuinsScanned(planet.name);
     this.logbook.recordRuinsScan(planet.name);
-    const surveyBeacon = this.mapStore.surfaceContractBeacons().find((b) => b.kind === 'survey-ruins');
+    const surveyBeacon = this.mapStore
+      .surfaceContractBeacons()
+      .find((b) => b.kind === 'survey-ruins');
     if (surveyBeacon) {
       this.snackbar.show('Survey objective updated — ruins logged for contract.', 'success', 4000);
       this.radio.announce('Ruins survey data uplinked to contract ledger.');
@@ -127,9 +130,15 @@ export class SurfaceMapBridgeService {
     const planet = this.mapStore.selectedPlanet();
     if (!planet) return;
     this.logbook.recordCaveMapped(planet.name, event.percent);
-    const surveyBeacon = this.mapStore.surfaceContractBeacons().find((b) => b.kind === 'survey-cave');
+    const surveyBeacon = this.mapStore
+      .surfaceContractBeacons()
+      .find((b) => b.kind === 'survey-cave');
     if (surveyBeacon && event.percent >= 50) {
-      this.snackbar.show('Survey objective updated — cave network logged for contract.', 'success', 4000);
+      this.snackbar.show(
+        'Survey objective updated — cave network logged for contract.',
+        'success',
+        4000,
+      );
       this.radio.announce('Cave survey data uplinked to contract ledger.');
     }
   }
@@ -138,7 +147,7 @@ export class SurfaceMapBridgeService {
     const planet = this.mapStore.selectedPlanet();
     if (!planet || beacon.kind !== 'deliver-crate' || !beacon.tradeSymbol) return;
 
-    const shipsHere = this.shipsForWaypoint(planet);
+    const shipsHere = shipsForWaypoint(this.mapStore.ships(), planet);
     const ship = shipsHere.find((s) => shipDocked(s)) ?? shipsHere[0];
     if (!ship) {
       this.snackbar.show('Dock a ship at this waypoint to deliver contract cargo', 'error');
@@ -164,7 +173,10 @@ export class SurfaceMapBridgeService {
     const units = Math.min(beacon.unitsRemaining ?? 1, onHand);
     try {
       await this.api.deliverContract(beacon.contractId, ship.symbol, beacon.tradeSymbol, units);
-      this.logbook.recordSurfaceContract(`Delivered ${units} ${beacon.tradeSymbol} from surface`, planet.name);
+      this.logbook.recordSurfaceContract(
+        `Delivered ${units} ${beacon.tradeSymbol} from surface`,
+        planet.name,
+      );
       this.snackbar.show(`Delivered ${units} ${beacon.tradeSymbol}`, 'success');
       this.sound.playFulfill();
       this.radio.announce(`Contract delivery confirmed — ${units} units logged.`);
@@ -179,7 +191,10 @@ export class SurfaceMapBridgeService {
           faction: contract.faction,
           credits: this.agentStore.agent()?.credits,
         });
-        this.logbook.recordContract(`Fulfilled ${contract.type} contract from surface`, planet.name);
+        this.logbook.recordContract(
+          `Fulfilled ${contract.type} contract from surface`,
+          planet.name,
+        );
         this.snackbar.show('Contract fulfilled!', 'success', 5000);
         this.sound.playFulfill();
       }
@@ -189,10 +204,14 @@ export class SurfaceMapBridgeService {
     }
   }
 
-  async onSurfaceMarketTrade(event: { symbol: string; mode: 'buy' | 'sell'; units: number }): Promise<void> {
+  async onSurfaceMarketTrade(event: {
+    symbol: string;
+    mode: 'buy' | 'sell';
+    units: number;
+  }): Promise<void> {
     const planet = this.mapStore.selectedPlanet();
     if (!planet) return;
-    const shipsHere = this.shipsForWaypoint(planet);
+    const shipsHere = shipsForWaypoint(this.mapStore.ships(), planet);
     const ship = shipsHere.find((s) => shipDocked(s)) ?? shipsHere[0];
     if (!ship) {
       this.snackbar.show('No ship at this waypoint to trade', 'error');
@@ -230,14 +249,8 @@ export class SurfaceMapBridgeService {
     }
   }
 
-  private shipsForWaypoint(planet: PlanetView): ShipData[] {
-    return this.mapStore.ships().filter(
-      (s) => s.nav.systemSymbol === planet.system && s.nav.waypointSymbol === planet.name,
-    );
-  }
-
   private async resolveOrbitShipForExtraction(planet: PlanetView): Promise<ShipData | null> {
-    const atWaypoint = this.shipsForWaypoint(planet);
+    const atWaypoint = shipsForWaypoint(this.mapStore.ships(), planet);
     const selected = this.mapStore.selectedShip();
     const preferred =
       (selected && shipAtWaypoint(selected, planet.name) ? selected : null) ??
