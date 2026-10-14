@@ -6,15 +6,12 @@ import {
   LineBasicMaterial,
   Mesh,
   MeshBasicMaterial,
-  QuadraticBezierCurve3,
   SphereGeometry,
   Vector3,
 } from 'three';
 import { ShipData } from '../../../models/ship.model';
 import { getStableTransitProgress, shipInTransit } from '../planet-helpers';
 import { ShipDynamicsEngine } from './ship-dynamics.engine';
-import { USE_PHYSICS_DYNAMICS } from './physics-units';
-import { transitArcLift } from './transit-arc.math';
 import { SystemOrbitEngine } from './system-orbit.engine';
 import { disposeObject3D } from './three-dispose.util';
 
@@ -24,8 +21,9 @@ const ARC_TRANSIT_COLOR = 0x5eead4;
 
 interface TransitArcData {
   ship: ShipData;
-  /** Legacy bezier fallback. */
-  curve: QuadraticBezierCurve3;
+  /** Live world positions of the leg's endpoints. */
+  v0: Vector3;
+  v2: Vector3;
   line: Line;
   dot: Mesh;
   pathPoints: Vector3[] | null;
@@ -40,8 +38,9 @@ export interface ArcPlanetLookup {
 export class TransitArcManager {
   readonly arcs = new Group();
 
-  private readonly scratch = new Vector3();
-  private readonly mid = new Vector3();
+  /** Star render radius kept clear by transit paths (0 = no avoidance). */
+  starRadius = 0;
+
   private readonly dynamics = new ShipDynamicsEngine();
 
   constructor() {
@@ -87,46 +86,23 @@ export class TransitArcManager {
       const route = ship.nav.route;
       if (!route) continue;
 
-      orbitEngine.getWorldPosition(route.origin.symbol, arc.curve.v0);
-      orbitEngine.getWorldPosition(route.destination.symbol, arc.curve.v2);
+      orbitEngine.getWorldPosition(route.origin.symbol, arc.v0);
+      orbitEngine.getWorldPosition(route.destination.symbol, arc.v2);
 
       const geometry = arc.line.geometry as BufferGeometry;
       const attr = geometry.getAttribute('position') as Float32BufferAttribute;
+      const opts = { starRadius: this.starRadius };
 
-      if (USE_PHYSICS_DYNAMICS) {
-        const points = this.dynamics.getTransitPathPoints(ship, arc.curve.v0, arc.curve.v2);
-        arc.pathPoints = points;
-        const step = Math.max(1, Math.floor(points.length / ARC_SEGMENTS));
-        let idx = 0;
-        for (let i = 0; i <= ARC_SEGMENTS; i++) {
-          const pi = Math.min(points.length - 1, i * step);
-          const p = points[pi]!;
-          attr.setXYZ(idx, p.x, p.y, p.z);
-          idx++;
-        }
-        for (; idx <= ARC_SEGMENTS; idx++) {
-          const last = points[points.length - 1]!;
-          attr.setXYZ(idx, last.x, last.y, last.z);
-        }
-        const t = getStableTransitProgress(ship);
-        const path = points;
-        const total = path.length - 1;
-        const fi = Math.min(total, Math.floor(t * total));
-        const frac = t * total - fi;
-        this.scratch.lerpVectors(path[fi]!, path[Math.min(total, fi + 1)]!, frac);
-        arc.dot.position.copy(this.scratch);
-      } else {
-        this.mid.addVectors(arc.curve.v0, arc.curve.v2).multiplyScalar(0.5);
-        this.mid.y += transitArcLift(arc.curve.v0, arc.curve.v2);
-        arc.curve.v1.copy(this.mid);
-
-        for (let i = 0; i <= ARC_SEGMENTS; i++) {
-          arc.curve.getPoint(i / ARC_SEGMENTS, this.scratch);
-          attr.setXYZ(i, this.scratch.x, this.scratch.y, this.scratch.z);
-        }
-        arc.curve.getPoint(getStableTransitProgress(ship), this.scratch);
-        arc.dot.position.copy(this.scratch);
+      const points = this.dynamics.getTransitPathPoints(ship, arc.v0, arc.v2, opts);
+      arc.pathPoints = points;
+      const last = points.length - 1;
+      for (let i = 0; i <= ARC_SEGMENTS; i++) {
+        const p = points[Math.min(last, Math.round((i / ARC_SEGMENTS) * last))]!;
+        attr.setXYZ(i, p.x, p.y, p.z);
       }
+      const t = getStableTransitProgress(ship);
+      const pose = this.dynamics.sampleTransit(ship, arc.v0, arc.v2, t, undefined, opts);
+      arc.dot.position.copy(pose.position);
 
       attr.needsUpdate = true;
       arc.dot.scale.setScalar(dotPulse);
@@ -155,7 +131,8 @@ export class TransitArcManager {
     group.add(dot);
     group.userData['arc'] = {
       ship,
-      curve: new QuadraticBezierCurve3(),
+      v0: new Vector3(),
+      v2: new Vector3(),
       line,
       dot,
       pathPoints: null,

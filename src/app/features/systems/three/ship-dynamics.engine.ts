@@ -1,27 +1,56 @@
 import { Object3D, Quaternion, Vector3 } from 'three';
 import { ShipData } from '../../../models/ship.model';
 import { shipInTransit } from '../planet-helpers';
-import { getMuForBody } from './celestial-mass';
-import { circularOrbitSpeedKmS } from './gravity-field';
-import { ORBIT_ALTITUDE_KM, USE_PHYSICS_DYNAMICS } from './physics-units';
-import { orbitVisualTimeScale } from './orbit-visual-scale';
-import { renderRadius, shipOrbitRenderDistance, shipOrbitVerticalOffset } from './render-transform';
-import { orientAlongArc, sampleTransitArc } from './transit-arc.math';
+import { ORBIT_ALTITUDE_KM } from './physics-units';
+import { shipOrbitRenderDistance } from './render-transform';
+import {
+  computeTransitDeviation,
+  facingQuaternion,
+  transitPoint,
+  transitProfile,
+  transitProfileRate,
+  transitTangent,
+} from './transit-arc.math';
+import {
+  UNIVERSE_TIME_SCALE,
+  displayMeanMotion,
+  symbolUnit,
+  universeTimeSec,
+} from './universe-physics';
 
 export interface ShipPose {
   position: Vector3;
+  /** Render units per universe second (per unit of progress when route times are unknown). */
   velocity: Vector3;
   quaternion: Quaternion;
 }
 
+/** Body a ship departs from / arrives at; when given, legs start/end on its parking orbit. */
+export interface ParkingBody {
+  simRadiusKm: number;
+  mu: number;
+}
+
+export interface TransitSampleOptions {
+  /** Star render radius (clearance kept around the world origin). 0/absent = no avoidance. */
+  starRadius?: number;
+  originBody?: ParkingBody;
+  destBody?: ParkingBody;
+}
+
 interface TransitPath {
   points: Vector3[];
-  cumulative: number[];
   totalLength: number;
   flightMode: string;
   /** Cached endpoint snapshots — invalidated when orbital positions drift. */
   origin: Vector3;
   dest: Vector3;
+  starRadius: number;
+  /** Parking-orbit offsets from the body centres at departure / arrival. */
+  originOffset: Vector3;
+  destOffset: Vector3;
+  /** Full-amplitude lateral deviation (see transit-arc.math). */
+  dev: Vector3;
 }
 
 interface OrbitSlot {
@@ -34,29 +63,14 @@ interface OrbitSlot {
 const SEGMENTS = 48;
 /** Rebuild transit geometry when an endpoint moves more than this (world units). */
 const TRANSIT_ENDPOINT_EPS = 0.1;
-const scratchA = new Vector3();
-const scratchB = new Vector3();
-const scratchC = new Vector3();
-
-function flightModeLiftMultiplier(mode: string): number {
-  switch (mode) {
-    case 'DRIFT':
-      return 1.35;
-    case 'STEALTH':
-      return 0.85;
-    case 'BURN':
-      return 0.45;
-    case 'CRUISE':
-    default:
-      return 1.0;
-  }
-}
-
-function ballisticMidpoint(v0: Vector3, v2: Vector3, flightMode: string, target: Vector3): Vector3 {
-  const dist = v0.distanceTo(v2);
-  const lift = Math.max(6, dist * 0.18) * flightModeLiftMultiplier(flightMode);
-  return target.set((v0.x + v2.x) * 0.5, (v0.y + v2.y) * 0.5 + lift, (v0.z + v2.z) * 0.5);
-}
+/** Parking-orbit inclination cap (rad): 25°. */
+const MAX_INCLINATION = (25 * Math.PI) / 180;
+const scratchO = new Vector3();
+const scratchD = new Vector3();
+const scratchT = new Vector3();
+const scratchV = new Vector3();
+const scratchOffA = new Vector3();
+const scratchOffB = new Vector3();
 
 function endpointsMatch(a: Vector3, b: Vector3, eps: number): boolean {
   return a.distanceToSquared(b) <= eps * eps;
@@ -67,109 +81,85 @@ function transitPathStillValid(
   flightMode: string,
   originPos: Vector3,
   destPos: Vector3,
+  starRadius: number,
 ): boolean {
   return (
     path.flightMode === flightMode &&
+    path.starRadius === starRadius &&
     endpointsMatch(path.origin, originPos, TRANSIT_ENDPOINT_EPS) &&
     endpointsMatch(path.dest, destPos, TRANSIT_ENDPOINT_EPS)
   );
 }
 
-function buildArcPoints(
-  v0: Vector3,
-  v2: Vector3,
-  flightMode: string,
-  reuse?: Vector3[],
-): Vector3[] {
-  const mid = ballisticMidpoint(v0, v2, flightMode, scratchA);
-  const points = reuse ?? [];
-  const needed = SEGMENTS + 1;
-  while (points.length < needed) {
-    points.push(new Vector3());
-  }
-  if (points.length > needed) {
-    points.length = needed;
-  }
-  for (let i = 0; i <= SEGMENTS; i++) {
-    const t = i / SEGMENTS;
-    const u = 1 - t;
-    const x = u * u * v0.x + 2 * u * t * mid.x + t * t * v2.x;
-    const y = u * u * v0.y + 2 * u * t * mid.y + t * t * v2.y;
-    const z = u * u * v0.z + 2 * u * t * mid.z + t * t * v2.z;
-    points[i]!.set(x, y, z);
-  }
-  return points;
+function buildArcLength(points: Vector3[]): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += points[i]!.distanceTo(points[i - 1]!);
+  return total;
 }
 
-function buildArcLengths(
-  points: Vector3[],
-  reuse?: number[],
-): { cumulative: number[]; totalLength: number } {
-  const cumulative = reuse ?? [];
-  cumulative.length = points.length;
-  cumulative[0] = 0;
-  for (let i = 1; i < points.length; i++) {
-    cumulative[i] = cumulative[i - 1]! + points[i]!.distanceTo(points[i - 1]!);
-  }
-  return { cumulative, totalLength: cumulative[cumulative.length - 1] ?? 0 };
+function clamp01(x: number): number {
+  return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
-function rebuildTransitPath(
-  path: TransitPath,
-  originPos: Vector3,
-  destPos: Vector3,
-  flightMode: string,
-): TransitPath {
-  buildArcPoints(originPos, destPos, flightMode, path.points);
-  const { cumulative, totalLength } = buildArcLengths(path.points, path.cumulative);
-  path.cumulative = cumulative;
-  path.totalLength = totalLength;
-  path.flightMode = flightMode;
-  path.origin.copy(originPos);
-  path.dest.copy(destPos);
-  return path;
+/** Route duration in universe seconds, or null when the API times are missing/invalid. */
+function routeDurationUniverseSec(ship: ShipData): number | null {
+  const route = ship.nav.route;
+  if (!route) return null;
+  const dep = Date.parse(route.departureTime);
+  const arr = Date.parse(route.arrival);
+  if (!Number.isFinite(dep) || !Number.isFinite(arr) || arr <= dep) return null;
+  return ((arr - dep) / 1000) * UNIVERSE_TIME_SCALE;
 }
 
-function sampleAlongPath(
-  points: Vector3[],
-  cumulative: number[],
-  totalLength: number,
-  t: number,
-  target: Vector3,
-): Vector3 {
-  if (points.length === 0) return target.set(0, 0, 0);
-  if (points.length === 1 || totalLength <= 1e-6) return target.copy(points[0]!);
-  const dist = Math.max(0, Math.min(1, t)) * totalLength;
-  let lo = 0;
-  let hi = cumulative.length - 1;
-  while (lo < hi - 1) {
-    const mid = (lo + hi) >> 1;
-    if (cumulative[mid]! <= dist) lo = mid;
-    else hi = mid;
-  }
-  const segLen = cumulative[hi]! - cumulative[lo]!;
-  const frac = segLen > 1e-6 ? (dist - cumulative[lo]!) / segLen : 0;
-  return target.lerpVectors(points[lo]!, points[hi]!, frac);
-}
-
-function orientAlongPath(
-  obj: Object3D,
-  points: Vector3[],
-  cumulative: number[],
-  totalLength: number,
-  t: number,
-  scratch: Vector3,
-): void {
-  sampleAlongPath(points, cumulative, totalLength, t, scratch);
-  const t2 = Math.min(1, t + 0.03);
-  const ahead = sampleAlongPath(points, cumulative, totalLength, t2, scratchA);
-  obj.lookAt(ahead);
-  obj.rotateY(Math.PI);
+function routeTimeUniverseSec(iso: string | undefined): number {
+  const ms = iso ? Date.parse(iso) : NaN;
+  return universeTimeSec(Number.isFinite(ms) ? ms : Date.now());
 }
 
 /**
- * Newtonian ship motion: ballistic transits (API-time authoritative) and
- * analytic circular orbits for IN_ORBIT status.
+ * Circular parking-orbit state relative to the body centre. The orbit lies on a
+ * ship-specific plane (inclination ≤ 25°, RAAN from the symbol hash), has constant
+ * radius and the displayed mean motion, and is traversed prograde.
+ * Velocity is in render units per universe second.
+ */
+export function parkingOrbitState(
+  shipSymbol: string,
+  simRadiusKm: number,
+  parentMu: number,
+  simTime: number,
+  orbitIndex: number,
+  orbitTotal: number,
+  offsetOut: Vector3,
+  velocityOut?: Vector3,
+): Vector3 {
+  const r = shipOrbitRenderDistance(simRadiusKm);
+  const omega = displayMeanMotion(parentMu, simRadiusKm + ORBIT_ALTITUDE_KM);
+  const inc = symbolUnit(shipSymbol, 1) * MAX_INCLINATION;
+  const raan = symbolUnit(shipSymbol, 2) * Math.PI * 2;
+  const spacing = orbitTotal > 1 ? (orbitIndex / orbitTotal) * Math.PI * 2 : 0;
+  const phase = spacing + symbolUnit(shipSymbol, 3) * Math.PI * 2 * 0.1 + omega * simTime;
+
+  const sinI = Math.sin(inc);
+  const cosI = Math.cos(inc);
+  const sinO = Math.sin(raan);
+  const cosO = Math.cos(raan);
+  // In-plane unit vector (x, z) → tilt about X by inclination → rotate about Y by RAAN.
+  const place = (px: number, pz: number, out: Vector3): Vector3 => {
+    const y = -pz * sinI;
+    const z = pz * cosI;
+    return out.set(px * cosO + z * sinO, y, -px * sinO + z * cosO);
+  };
+  place(Math.cos(phase) * r, Math.sin(phase) * r, offsetOut);
+  if (velocityOut) {
+    place(-Math.sin(phase) * r * omega, Math.cos(phase) * r * omega, velocityOut);
+  }
+  return offsetOut;
+}
+
+/**
+ * Newtonian-flavoured ship motion: transits follow a flight-mode velocity profile
+ * (API-time authoritative) along a planar path that blends the endpoint frames and
+ * bends around the star; IN_ORBIT ships fly circular, inclined parking orbits.
  */
 export class ShipDynamicsEngine {
   private transitPaths = new Map<string, TransitPath>();
@@ -185,33 +175,74 @@ export class ShipDynamicsEngine {
     return `${ship.symbol}|${route.origin.symbol}>${route.destination.symbol}|${ship.nav.flightMode}|${route.departureTime}|${route.arrival}`;
   }
 
-  /** Precompute or refresh a ballistic transit path between two world positions. */
-  ensureTransitPath(ship: ShipData, originPos: Vector3, destPos: Vector3): TransitPath {
+  /** Precompute or refresh a transit path between two world positions. */
+  ensureTransitPath(
+    ship: ShipData,
+    originPos: Vector3,
+    destPos: Vector3,
+    opts?: TransitSampleOptions,
+  ): TransitPath {
     const key = this.transitKey(ship);
     const flightMode = ship.nav.flightMode ?? 'CRUISE';
+    const starRadius = opts?.starRadius ?? 0;
     const existing = this.transitPaths.get(key);
-    if (existing && transitPathStillValid(existing, flightMode, originPos, destPos)) {
+    if (existing && transitPathStillValid(existing, flightMode, originPos, destPos, starRadius)) {
       return existing;
     }
 
-    if (existing) {
-      return rebuildTransitPath(existing, originPos, destPos, flightMode);
+    const path: TransitPath = existing ?? {
+      points: [],
+      totalLength: 0,
+      flightMode,
+      origin: new Vector3(),
+      dest: new Vector3(),
+      starRadius,
+      originOffset: new Vector3(),
+      destOffset: new Vector3(),
+      dev: new Vector3(),
+    };
+    if (!existing) this.transitPaths.set(key, path);
+
+    const route = ship.nav.route;
+    path.originOffset.set(0, 0, 0);
+    path.destOffset.set(0, 0, 0);
+    if (opts?.originBody) {
+      parkingOrbitState(
+        ship.symbol,
+        opts.originBody.simRadiusKm,
+        opts.originBody.mu,
+        routeTimeUniverseSec(route?.departureTime),
+        0,
+        1,
+        path.originOffset,
+      );
+    }
+    if (opts?.destBody) {
+      parkingOrbitState(
+        ship.symbol,
+        opts.destBody.simRadiusKm,
+        opts.destBody.mu,
+        routeTimeUniverseSec(route?.arrival),
+        0,
+        1,
+        path.destOffset,
+      );
     }
 
-    const path = rebuildTransitPath(
-      {
-        points: [],
-        cumulative: [],
-        totalLength: 0,
-        flightMode,
-        origin: new Vector3(),
-        dest: new Vector3(),
-      },
-      originPos,
-      destPos,
-      flightMode,
-    );
-    this.transitPaths.set(key, path);
+    const o = scratchO.copy(originPos).add(path.originOffset);
+    const d = scratchD.copy(destPos).add(path.destOffset);
+    computeTransitDeviation(o, d, starRadius, path.dev);
+
+    while (path.points.length < SEGMENTS + 1) path.points.push(new Vector3());
+    path.points.length = SEGMENTS + 1;
+    for (let i = 0; i <= SEGMENTS; i++) {
+      transitPoint(o, d, path.dev, i / SEGMENTS, path.points[i]!);
+    }
+    path.totalLength = buildArcLength(path.points);
+    path.flightMode = flightMode;
+    path.starRadius = starRadius;
+    path.origin.copy(originPos);
+    path.dest.copy(destPos);
     return path;
   }
 
@@ -222,30 +253,29 @@ export class ShipDynamicsEngine {
     destPos: Vector3,
     t: number,
     targetObj?: Object3D,
+    opts?: TransitSampleOptions,
   ): ShipPose {
-    if (!USE_PHYSICS_DYNAMICS) {
-      sampleTransitArc(originPos, destPos, t, this.posePosition);
-      if (targetObj) orientAlongArc(targetObj, originPos, destPos, t, scratchA);
-      return {
-        position: this.posePosition.clone(),
-        velocity: this.poseVelocity.set(0, 0, 0),
-        quaternion: targetObj ? targetObj.quaternion.clone() : this.poseQuat.set(0, 0, 0, 1),
-      };
-    }
+    const path = this.ensureTransitPath(ship, originPos, destPos, opts);
+    const u = clamp01(t);
+    const s = transitProfile(path.flightMode, u);
+    // Endpoints follow the live frames exactly; only the lateral deviation is cached.
+    const o = scratchO.copy(originPos).add(path.originOffset);
+    const d = scratchD.copy(destPos).add(path.destOffset);
 
-    const path = this.ensureTransitPath(ship, originPos, destPos);
-    sampleAlongPath(path.points, path.cumulative, path.totalLength, t, this.posePosition);
-    if (targetObj) {
-      orientAlongPath(targetObj, path.points, path.cumulative, path.totalLength, t, scratchA);
-    }
-    const tAhead = Math.min(1, t + 0.02);
-    sampleAlongPath(path.points, path.cumulative, path.totalLength, tAhead, scratchB);
-    this.poseVelocity.subVectors(scratchB, this.posePosition).multiplyScalar(50);
+    transitPoint(o, d, path.dev, s, this.posePosition);
+    transitTangent(o, d, path.dev, s, scratchT);
+    facingQuaternion(scratchT, this.poseQuat);
+    if (targetObj) targetObj.quaternion.copy(this.poseQuat);
+
+    // v = dp/ds · ds/dt; ds/dt in universe seconds when the route times are known.
+    const duration = routeDurationUniverseSec(ship);
+    const rate = transitProfileRate(path.flightMode, u) / (duration ?? 1);
+    this.poseVelocity.copy(scratchT).multiplyScalar(rate);
 
     return {
       position: this.posePosition.clone(),
       velocity: this.poseVelocity.clone(),
-      quaternion: targetObj ? targetObj.quaternion.clone() : this.poseQuat.set(0, 0, 0, 1),
+      quaternion: this.poseQuat.clone(),
     };
   }
 
@@ -269,7 +299,10 @@ export class ShipDynamicsEngine {
     this.orbitSlots.delete(shipSymbol);
   }
 
-  /** Analytic circular orbit pose for IN_ORBIT ships. */
+  /**
+   * Analytic circular parking-orbit position for IN_ORBIT ships. `simTime` is
+   * universe seconds. Optionally writes the velocity (render units / universe s).
+   */
   sampleOrbit(
     shipSymbol: string,
     parentPos: Vector3,
@@ -279,16 +312,19 @@ export class ShipDynamicsEngine {
     orbitIndex: number,
     orbitTotal: number,
     target = new Vector3(),
+    velocityOut?: Vector3,
   ): Vector3 {
-    const orbitRenderR = shipOrbitRenderDistance(simRadiusKm);
-    const orbitKm = simRadiusKm + ORBIT_ALTITUDE_KM;
-    const omega =
-      (circularOrbitSpeedKmS(parentMu, orbitKm) / orbitKm) * orbitVisualTimeScale(parentMu);
-    const phase = (orbitTotal > 1 ? (orbitIndex / orbitTotal) * Math.PI * 2 : 0) + omega * simTime;
-    const x = Math.cos(phase) * orbitRenderR;
-    const z = Math.sin(phase) * orbitRenderR;
-    const y = shipOrbitVerticalOffset(renderRadius(simRadiusKm, 'local'));
-    return target.set(parentPos.x + x, parentPos.y + y, parentPos.z + z);
+    parkingOrbitState(
+      shipSymbol,
+      simRadiusKm,
+      parentMu,
+      simTime,
+      orbitIndex,
+      orbitTotal,
+      target,
+      velocityOut,
+    );
+    return target.add(parentPos);
   }
 
   /** Resolve ship pose based on nav status. */
@@ -304,9 +340,10 @@ export class ShipDynamicsEngine {
     orbitIndex: number,
     orbitTotal: number,
     targetObj?: Object3D,
+    opts?: TransitSampleOptions,
   ): ShipPose {
     if (shipInTransit(ship) && originPos && destPos) {
-      return this.sampleTransit(ship, originPos, destPos, transitProgress, targetObj);
+      return this.sampleTransit(ship, originPos, destPos, transitProgress, targetObj, opts);
     }
 
     if (ship.nav.status === 'IN_ORBIT') {
@@ -318,34 +355,42 @@ export class ShipDynamicsEngine {
         simTime,
         orbitIndex,
         orbitTotal,
+        new Vector3(),
+        scratchV,
       );
+      facingQuaternion(scratchV, this.poseQuat);
+      if (targetObj) targetObj.quaternion.copy(this.poseQuat);
       return {
         position: pos,
-        velocity: this.poseVelocity.set(0, 0, 0),
-        quaternion: this.poseQuat.set(0, 0, 0, 1),
+        velocity: scratchV.clone(),
+        quaternion: this.poseQuat.clone(),
       };
     }
 
-    // DOCKED — stationary standoff
+    // DOCKED — stationary standoff in the ecliptic, nose toward the body.
     const orbitR = shipOrbitRenderDistance(simRadiusKm);
-    const angle = orbitTotal > 1 ? (orbitIndex / orbitTotal) * Math.PI * 2 : 0;
-    const y = shipOrbitVerticalOffset(renderRadius(simRadiusKm, 'local'));
-    this.posePosition.set(
-      parentPos.x + Math.cos(angle) * orbitR,
-      parentPos.y + y,
-      parentPos.z + Math.sin(angle) * orbitR,
-    );
-    if (targetObj) targetObj.rotation.set(0, Math.PI * 0.12, 0);
+    const angle =
+      (orbitTotal > 1 ? (orbitIndex / orbitTotal) * Math.PI * 2 : 0) +
+      symbolUnit(ship.symbol, 3) * Math.PI * 2 * 0.1;
+    const radial = scratchOffA.set(Math.cos(angle), 0, Math.sin(angle));
+    this.posePosition.copy(parentPos).addScaledVector(radial, orbitR);
+    facingQuaternion(scratchOffB.copy(radial).negate(), this.poseQuat);
+    if (targetObj) targetObj.quaternion.copy(this.poseQuat);
     return {
       position: this.posePosition.clone(),
-      velocity: this.poseVelocity.set(0, 0, 0),
-      quaternion: this.poseQuat.set(0, 0, 0, 1),
+      velocity: this.poseVelocity.set(0, 0, 0).clone(),
+      quaternion: this.poseQuat.clone(),
     };
   }
 
-  /** Points along the transit path for arc drawing. */
-  getTransitPathPoints(ship: ShipData, originPos: Vector3, destPos: Vector3): Vector3[] {
-    return this.ensureTransitPath(ship, originPos, destPos).points;
+  /** Points along the transit path (uniform in path progress) for arc drawing. */
+  getTransitPathPoints(
+    ship: ShipData,
+    originPos: Vector3,
+    destPos: Vector3,
+    opts?: TransitSampleOptions,
+  ): Vector3[] {
+    return this.ensureTransitPath(ship, originPos, destPos, opts).points;
   }
 
   invalidateTransit(shipSymbol: string): void {

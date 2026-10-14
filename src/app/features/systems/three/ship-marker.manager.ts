@@ -62,6 +62,9 @@ export class ShipMarkerManager {
 
   private readonly originScratch = new Vector3();
   private readonly destScratch = new Vector3();
+  /** Star render radius kept clear by transit paths (0 = no avoidance). */
+  starRadius = 0;
+
   private readonly dynamics = new ShipDynamicsEngine();
 
   constructor(private readonly style: MarkerStyleOptions = {}) {
@@ -180,9 +183,6 @@ export class ShipMarkerManager {
           child,
         );
         child.position.copy(pose.position);
-        if (data.kind === 'docked') {
-          child.rotation.set(0, Math.PI * 0.12, 0);
-        }
         this.syncBlipToMarker(child);
         continue;
       }
@@ -199,7 +199,11 @@ export class ShipMarkerManager {
       const t = getStableTransitProgress(ship);
       orbitEngine.getWorldPosition(data.originSymbol, originPos);
       orbitEngine.getWorldPosition(data.destSymbol, destPos);
-      const pose = this.dynamics.sampleTransit(ship, originPos, destPos, t, child);
+      const pose = this.dynamics.sampleTransit(ship, originPos, destPos, t, child, {
+        starRadius: this.starRadius,
+        originBody: { simRadiusKm: originEntry.simRadiusKm, mu: getMuForBody(originEntry.planet) },
+        destBody: { simRadiusKm: destEntry.simRadiusKm, mu: getMuForBody(destEntry.planet) },
+      });
       child.position.copy(pose.position);
       this.syncBlipToMarker(child);
     }
