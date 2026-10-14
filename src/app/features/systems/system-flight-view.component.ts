@@ -1006,7 +1006,12 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     }
 
     for (const planet of planets) {
-      const built = buildCelestialBody(planet, this.layout, this.surfaceBaker ?? undefined);
+      const built = buildCelestialBody(
+        planet,
+        this.layout,
+        this.surfaceBaker ?? undefined,
+        this.starType(),
+      );
       const pos = this.orbitEngine.getWorldPosition(planet.name);
       built.group.position.copy(pos);
       this.scene.add(built.group);

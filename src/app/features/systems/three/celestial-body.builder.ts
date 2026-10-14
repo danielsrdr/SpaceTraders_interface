@@ -20,6 +20,7 @@ import { PlanetView } from '../../../models/system.model';
 import { resolveWaypointType } from '../planet-helpers';
 import { createLitPlanetMaterial, planetTypeCode } from './celestial-planet.shader';
 import { SurfaceBaker } from './celestial-surface.baker';
+import { planetLook, type PlanetLook } from './planet-look';
 import { planetSeedUnit } from './planet-seed';
 import { buildSurfaceTraitProfile } from './surface-trait-profile';
 import { getPlanetRadius3d, SystemLayout3d } from './system-scene.layout';
@@ -137,13 +138,17 @@ function addAtmosphereRim(
   radius: number,
   glowColor: number,
   planet: PlanetView,
+  look?: PlanetLook,
 ): void {
-  const glow = new Color(glowColor);
+  // Airless bodies have no halo at all.
+  if (look && look.atmosphere.thickness <= 0) return;
+  const glow = new Color(look ? look.atmosphere.color : glowColor);
   const material = new ShaderMaterial({
     uniforms: {
       sunPosition: { value: new Vector3(0, 0, 0) },
       uColor: { value: new Vector3(glow.r, glow.g, glow.b) },
       uTime: { value: 0 },
+      uAlpha: { value: look ? look.atmosphere.alpha : 0.85 },
     },
     vertexShader: `
       varying vec3 vNormal;
@@ -159,6 +164,7 @@ function addAtmosphereRim(
       uniform vec3 sunPosition;
       uniform vec3 uColor;
       uniform float uTime;
+      uniform float uAlpha;
       varying vec3 vNormal;
       varying vec3 vWorldPos;
 
@@ -172,7 +178,7 @@ function addAtmosphereRim(
         float rim = pow(1.0 - abs(dot(viewDir, N)), 2.5);
         float shimmer = 0.96 + 0.04 * sin(uTime * 0.7);
 
-        vec3 dayCol = mix(uColor, vec3(0.4, 0.6, 1.0), 0.5);
+        vec3 dayCol = mix(uColor, vec3(1.0), 0.2);
         // Softer, less saturated Rayleigh sunset confined to a thin terminator band.
         vec3 sunsetCol = vec3(1.0, 0.62, 0.42);
         float term = 1.0 - smoothstep(0.0, 0.22, abs(ndl));
@@ -180,7 +186,7 @@ function addAtmosphereRim(
         vec3 col = mix(uColor * 0.3, dayCol, lit);
         col = mix(col, sunsetCol, term * lit * 0.45);
 
-        float alpha = clamp(rim * lit, 0.0, 1.0) * 0.85 * shimmer;
+        float alpha = clamp(rim * lit, 0.0, 1.0) * uAlpha * shimmer;
         gl_FragColor = vec4(col, alpha);
       }
     `,
@@ -190,7 +196,10 @@ function addAtmosphereRim(
     depthWrite: false,
   });
 
-  const atmosphere = new Mesh(new SphereGeometry(radius * 1.06, 32, 32), material);
+  const atmosphere = new Mesh(
+    new SphereGeometry(radius * (look ? look.atmosphere.shellScale : 1.06), 32, 32),
+    material,
+  );
   atmosphere.userData['planet'] = planet;
   atmosphere.userData['decor'] = true;
   group.add(atmosphere);
@@ -223,10 +232,14 @@ function buildSphereBody(
   sunPosition = new Vector3(0, 0, 0),
   planetType = 'PLANET',
   baker?: SurfaceBaker,
+  starType?: string | null,
 ): WebGLRenderTarget | undefined {
   const tinted = tintedColor(palette.color, planet.name);
   const profile = buildSurfaceTraitProfile(planet);
   tinted.lerp(new Color(profile.fogColor), 0.25);
+  const look = planetLook(planet, starType);
+  // Gas giants stay procedural: tint their bands with the atmosphere colour.
+  if (planetTypeCode(planetType) === 1) tinted.lerp(new Color(look.atmosphere.color), 0.5);
   const seed = planetSeedUnit(planet.name);
   const typeCode = planetTypeCode(planetType);
 
@@ -240,6 +253,7 @@ function buildSphereBody(
       seed,
       baseColor: tinted,
       size: typeCode === 2 ? 256 : 512,
+      look,
     });
     bakedSurface = surfaceTarget.texture;
   }
@@ -253,11 +267,14 @@ function buildSphereBody(
       planetType,
       seed,
       bakedSurface,
+      sunColor: look.sunColor,
+      sunIntensity: look.sunIntensity,
+      rimStrength: look.atmosphere.thickness > 0 ? 1 : 0,
     }),
   );
   core.userData['planet'] = planet;
   group.add(core);
-  addAtmosphereRim(group, radius, palette.glow, planet);
+  addAtmosphereRim(group, radius, palette.glow, planet, look);
   return surfaceTarget;
 }
 
@@ -416,6 +433,7 @@ export function buildCelestialBody(
   planet: PlanetView,
   layout: SystemLayout3d,
   baker?: SurfaceBaker,
+  starType?: string | null,
 ): CelestialBodyResult {
   const resolved = resolveWaypointType(planet.type);
   const palette = TYPE_PALETTE[resolved] ?? TYPE_PALETTE['PLANET']!;
@@ -449,7 +467,7 @@ export function buildCelestialBody(
       break;
     case 'GAS_GIANT':
     case 'NEBULA': {
-      buildSphereBody(group, radius, palette, planet, 36, undefined, resolved, baker);
+      buildSphereBody(group, radius, palette, planet, 36, undefined, resolved, baker, starType);
       const ring = new Mesh(
         new RingGeometry(radius * 1.4, radius * 2.2, 64),
         new MeshStandardMaterial({
@@ -477,6 +495,7 @@ export function buildCelestialBody(
         undefined,
         resolved,
         baker,
+        starType,
       );
       break;
     default: {
@@ -489,6 +508,7 @@ export function buildCelestialBody(
         undefined,
         resolved,
         baker,
+        starType,
       );
       break;
     }
