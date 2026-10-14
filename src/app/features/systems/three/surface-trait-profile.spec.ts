@@ -15,7 +15,7 @@ describe('buildSurfaceTraitProfile', () => {
   it('biases jungle when JUNGLE trait is present', () => {
     const profile = buildSurfaceTraitProfile(planet(['JUNGLE']));
     expect(profile.biomeBias.jungle).toBeGreaterThan(0.3);
-    expect(profile.weatherPool).toContain('sand-storm');
+    expect(profile.environment.kind).toBe('jungle');
   });
 
   it('adds aurora weather for FROZEN trait', () => {

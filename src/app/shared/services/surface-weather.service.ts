@@ -13,6 +13,8 @@ const ANNOUNCEMENTS: Record<SurfaceWeatherKind, string> = {
   'acid-rain': 'Acid rain detected. Surface sensors degraded.',
   aurora: 'Polar aurora active. Night veins may be visible.',
   'giant-winds': 'Upper-atmosphere winds intensifying near the siphon deck.',
+  'ash-fall': 'Volcanic ash fall. Visibility and scan reduced.',
+  snow: 'Snowfall setting in. Visibility dropping.',
 };
 
 /**
@@ -35,14 +37,14 @@ export class SurfaceWeatherService {
     return this.sensorQualitySig();
   }
 
-  private pool: SurfaceWeatherKind[] = ['sand-storm'];
+  private pool: SurfaceWeatherKind[] = [];
   private hazardLevel = 0;
   private current: ActiveSurfaceWeather | null = null;
   private nextAtMs = 0;
   private configured = false;
 
   configure(pool: SurfaceWeatherKind[], hazardLevel: number): void {
-    this.pool = pool.length ? [...pool] : ['sand-storm'];
+    this.pool = [...pool];
     this.hazardLevel = hazardLevel;
     this.current = null;
     this.event.set(null);
@@ -50,6 +52,7 @@ export class SurfaceWeatherService {
     this.sensorQualitySig.set(1);
     this.nextAtMs = 0;
     this.configured = true;
+    // An empty pool means calm skies — update() stays idle.
   }
 
   reset(): void {
@@ -62,7 +65,7 @@ export class SurfaceWeatherService {
   }
 
   update(nowMs: number): void {
-    if (!this.configured) return;
+    if (!this.configured || !this.pool.length) return;
 
     if (this.nextAtMs === 0) {
       this.nextAtMs = nowMs + 20_000 + Math.random() * 30_000;
@@ -90,7 +93,13 @@ export class SurfaceWeatherService {
   private startEvent(nowMs: number): void {
     const kind = this.pool[Math.floor(Math.random() * this.pool.length)]!;
     const durationMs =
-      kind === 'aurora' ? 22_000 : kind === 'giant-winds' ? 14_000 : kind === 'acid-rain' ? 18_000 : 12_000;
+      kind === 'aurora'
+        ? 22_000
+        : kind === 'giant-winds'
+          ? 14_000
+          : kind === 'acid-rain'
+            ? 18_000
+            : 12_000;
 
     this.current = { kind, startMs: nowMs, durationMs };
     this.event.set(kind);
@@ -115,6 +124,13 @@ export class SurfaceWeatherService {
       case 'aurora': {
         this.intensity = 0.35 + 0.25 * Math.sin(t * Math.PI * 4);
         this.sensorQualitySig.set(1);
+        break;
+      }
+      case 'ash-fall':
+      case 'snow': {
+        const dip = Math.sin(Math.min(1, t) * Math.PI);
+        this.intensity = dip * (ev.kind === 'snow' ? 0.6 : 0.75);
+        this.sensorQualitySig.set(1 - dip * (0.25 + this.hazardLevel * 0.2));
         break;
       }
       case 'giant-winds': {

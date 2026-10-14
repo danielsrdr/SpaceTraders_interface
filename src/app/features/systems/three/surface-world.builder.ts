@@ -5,6 +5,8 @@ import {
   Group,
   Mesh,
   MeshBasicMaterial,
+  MeshStandardMaterial,
+  PlaneGeometry,
   RingGeometry,
   Vector3,
 } from 'three';
@@ -15,7 +17,11 @@ import { createMineCart, MineCart } from './mine/mine-cart';
 import { buildSurfaceProps } from './surface-props.builder';
 import { buildSurfacePoiConfig } from './surface-poi';
 import { buildSurfaceZones, SurfaceZone } from './surface-zones';
-import { createCaveInteriorCollision, createSurfaceCollision, SurfaceCollision } from './surface-collision';
+import {
+  createCaveInteriorCollision,
+  createSurfaceCollision,
+  SurfaceCollision,
+} from './surface-collision';
 import {
   createSurfaceColliderRegistry,
   SurfaceColliderRegistry,
@@ -26,8 +32,17 @@ import { buildRuinsStructuresAt } from './zone-ruins.builder';
 import { buildDepotStructuresAt } from './zone-depot.builder';
 import { buildSiphonPlatformAt } from './zone-siphon.builder';
 import { buildCaveStructuresAt } from './zone-cave.builder';
-import { createCaveTunnelManager, type CaveConfig, type CaveTunnelManager } from './cave/cave-tunnel.manager';
-import { createTerrainHeightField, TerrainHeightField } from './terrain/terrain-height';
+import {
+  createCaveTunnelManager,
+  type CaveConfig,
+  type CaveTunnelManager,
+} from './cave/cave-tunnel.manager';
+import {
+  createTerrainHeightField,
+  TerrainHeightField,
+  WORLD_RADIUS,
+} from './terrain/terrain-height';
+import type { SurfacePoiConfig } from './surface-poi';
 import { applyTerrainProfile } from './terrain/terrain-material';
 import { createTerrainChunkManager, TerrainChunkManager } from './terrain/terrain-chunk.manager';
 import { buildSurfaceFauna, type SurfaceFaunaResult } from './surface-fauna.builder';
@@ -133,10 +148,45 @@ function beaconPositionForPoi(poi: SurfacePoiDefinition, baseY: number): Vector3
   }
 }
 
-function computeSpawnHeading(
-  spawn: { x: number; z: number },
-  anchors: SurfacePoiAnchor[],
-): number {
+/**
+ * Flat sea/lava/ice/methane plane at the environment's liquid level. The level
+ * is capped below the spawn and every POI pad so the player never starts flooded.
+ */
+function buildLiquidSurface(
+  config: SurfacePoiConfig,
+  heightField: TerrainHeightField,
+  spawn: { y: number },
+): Mesh | null {
+  const { terrain } = config.profile.environment;
+  if (!terrain.liquid || config.isGas || config.isAsteroid) return null;
+
+  let level = Math.min(terrain.liquidLevel, spawn.y - 2.4);
+  for (const poi of config.pois) {
+    level = Math.min(level, heightField.getHeight(poi.position.x, poi.position.z) - 0.4);
+  }
+  if (level < 1.2) return null;
+
+  const lava = terrain.liquid === 'lava';
+  const solid = terrain.liquid === 'ice';
+  const mesh = new Mesh(
+    new PlaneGeometry(WORLD_RADIUS * 2.4, WORLD_RADIUS * 2.4),
+    new MeshStandardMaterial({
+      color: terrain.liquidColor,
+      emissive: lava ? terrain.liquidColor : 0x000000,
+      emissiveIntensity: lava ? 0.9 : 0,
+      transparent: !lava && !solid,
+      opacity: lava || solid ? 1 : 0.78,
+      roughness: solid ? 0.35 : 0.15,
+      metalness: 0.1,
+    }),
+  );
+  mesh.name = 'surface-liquid';
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = level;
+  return mesh;
+}
+
+function computeSpawnHeading(spawn: { x: number; z: number }, anchors: SurfacePoiAnchor[]): number {
   if (!anchors.length) return 0;
   let best: SurfacePoiAnchor | null = null;
   let bestDist = Infinity;
@@ -158,8 +208,9 @@ export function buildSurfaceWorld(
   market: MarketData | null = null,
   shipyard: ShipyardData | null = null,
   scanDepositSymbols: string[] = [],
+  starType: string | null = null,
 ): SurfaceWorldResult {
-  const poiConfig = buildSurfacePoiConfig(planet);
+  const poiConfig = buildSurfacePoiConfig(planet, starType);
   const heightField = createTerrainHeightField(poiConfig);
   const terrainManager = createTerrainChunkManager(heightField, poiConfig);
   const tunnels = createMineTunnelManager(
@@ -193,6 +244,9 @@ export function buildSurfaceWorld(
   const root = new Group();
   root.name = 'surface-world';
   root.add(terrainManager.root);
+
+  const liquidMesh = buildLiquidSurface(poiConfig, heightField, spawn);
+  if (liquidMesh) root.add(liquidMesh);
 
   const poiAnchors: SurfacePoiAnchor[] = [];
   let marketClerk: MarketClerkAnchor | null = null;
@@ -237,9 +291,7 @@ export function buildSurfaceWorld(
           root.add(built.group);
           built.colliders.forEach((c) => colliders.add(c, 'mine'));
         }
-        const rimY = poiConfig.isGas
-          ? baseY + 6
-          : heightField.getHeight(x + PIT_RADIUS * 0.9, z);
+        const rimY = poiConfig.isGas ? baseY + 6 : heightField.getHeight(x + PIT_RADIUS * 0.9, z);
         root.add(buildPoiBeacon(x, z, rimY, beaconColor));
         poiAnchors.push({
           kind: poi.kind,
@@ -327,12 +379,8 @@ export function buildSurfaceWorld(
 
   let fauna: SurfaceFaunaResult | null = null;
   if (!poiConfig.isGas) {
-    fauna = buildSurfaceFauna(
-      poiConfig.seed,
-      poiConfig.profile,
-      spawn,
-      poiAnchors,
-      (x, z) => heightField.getHeight(x, z),
+    fauna = buildSurfaceFauna(poiConfig.seed, poiConfig.profile, spawn, poiAnchors, (x, z) =>
+      heightField.getHeight(x, z),
     );
     root.add(fauna.group);
   }

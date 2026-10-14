@@ -341,13 +341,18 @@ export function planetEnvironment(
 
   const frozenTrait = hasAny(traits, 'FROZEN', 'ICE_CRYSTALS');
   const hotTrait = hasAny(traits, 'VOLCANIC', 'MAGMA_SEAS', 'SUPERVOLCANOES');
-  if (traits.has('FROZEN')) temperatureK = Math.min(temperatureK, 258 - 18 * symbolUnit(planet.name, 25));
+  if (traits.has('FROZEN'))
+    temperatureK = Math.min(temperatureK, 258 - 18 * symbolUnit(planet.name, 25));
   if (traits.has('ICE_CRYSTALS')) temperatureK = Math.min(temperatureK, 268);
   if (hotTrait) {
     const floor = traits.has('MAGMA_SEAS') ? 520 : traits.has('SUPERVOLCANOES') ? 400 : 430;
     temperatureK = Math.max(temperatureK, floor + 60 * symbolUnit(planet.name, 26));
   }
-  if (!frozenTrait && !hotTrait && hasAny(traits, 'TEMPERATE', 'BREATHABLE_ATMOSPHERE', 'TERRAFORMED')) {
+  if (
+    !frozenTrait &&
+    !hotTrait &&
+    hasAny(traits, 'TEMPERATE', 'BREATHABLE_ATMOSPHERE', 'TERRAFORMED')
+  ) {
     temperatureK = clamp(temperatureK, 270, 305);
   }
   temperatureK = Math.max(temperatureK, 3);
@@ -363,8 +368,7 @@ export function planetEnvironment(
   if (overcast) swing *= 0.5;
 
   // ── atmosphere composition ──
-  const toxic =
-    isGasGiant || hasAny(traits, 'TOXIC_ATMOSPHERE', 'EXPLOSIVE_GASES', 'RADIOACTIVE');
+  const toxic = isGasGiant || hasAny(traits, 'TOXIC_ATMOSPHERE', 'EXPLOSIVE_GASES', 'RADIOACTIVE');
   const corrosive = traits.has('CORROSIVE_ATMOSPHERE');
   const naturalBreathable =
     hasAtmosphere &&
@@ -394,9 +398,14 @@ export function planetEnvironment(
 
   // ── sky ──
   const skyLuma = clamp(0.35 + 0.65 * Math.sqrt(Math.min(flux, 1)), 0.25, 1);
-  const thickness = hasAtmosphere ? clamp(0.55 + 0.2 * Math.log10(1 + pressureBar * 10), 0.4, 1) : 0;
+  const thickness = hasAtmosphere
+    ? clamp(0.55 + 0.2 * Math.log10(1 + pressureBar * 10), 0.4, 1)
+    : 0;
   let zenith = scaleColor(scatter, 0.55 * skyLuma);
-  let horizon = scaleColor(mixColor(scatter, star.color, 0.35 + 0.4 * (1 - thickness)), 0.95 * skyLuma);
+  let horizon = scaleColor(
+    mixColor(scatter, star.color, 0.35 + 0.4 * (1 - thickness)),
+    0.95 * skyLuma,
+  );
   if (pressureBar >= 5 || isGasGiant) {
     zenith = mixColor(zenith, horizon, 0.5);
   }
@@ -445,14 +454,24 @@ export function planetEnvironment(
     if (corrosive || traits.has('TOXIC_ATMOSPHERE')) weather.push('acid-rain');
     if (hasAny(traits, 'STRONG_MAGNETOSPHERE', 'VIBRANT_AURORAS')) weather.push('aurora');
     if (frozenTrait || (kind === 'frozen' && pressureBar > 0.1)) weather.push('snow');
-    if (kind === 'desert' || hasAny(traits, 'DRY_SEABEDS', 'SALT_FLATS')) weather.push('sand-storm');
+    if (frozenTrait) weather.push('aurora');
+    if (kind === 'desert' || hasAny(traits, 'DRY_SEABEDS', 'SALT_FLATS'))
+      weather.push('sand-storm');
     if (!weather.length && pressureBar >= 0.3 && kind !== 'ocean' && kind !== 'station') {
       weather.push(kind === 'frozen' ? 'snow' : 'sand-storm');
     }
   }
 
   // ── terrain ──
-  const terrain = buildTerrainHints(planet, kind, traits, temperatureK, pressureBar, gravityMs2, hasAtmosphere);
+  const terrain = buildTerrainHints(
+    planet,
+    kind,
+    traits,
+    temperatureK,
+    pressureBar,
+    gravityMs2,
+    hasAtmosphere,
+  );
 
   const hazardLevel = clamp(
     (toxic && !isGasGiant ? 0.4 : 0) +
@@ -614,7 +633,8 @@ function buildTerrainHints(
   let craterDensity = 0;
   if (deep) craterDensity = 0.7;
   else if (shallow) craterDensity = 0.45;
-  if (!hasAtmosphere) craterDensity = Math.max(craterDensity, 0.3 + 0.2 * symbolUnit(planet.name, 32));
+  if (!hasAtmosphere)
+    craterDensity = Math.max(craterDensity, 0.3 + 0.2 * symbolUnit(planet.name, 32));
   else craterDensity *= clamp(1 - pressureBar * 0.4, 0.2, 1);
   if (kind === 'gas-giant' || kind === 'station') craterDensity = 0;
 
@@ -638,6 +658,16 @@ function buildTerrainHints(
     reliefScale,
     snowCover: snow,
   };
+}
+
+/** FPS gravity constant (game units) from a real surface gravity in m/s². */
+export function fpsGravityFromMs2(gravityMs2: number): number {
+  return clamp(22 * (gravityMs2 / 9.80665), 4, 28);
+}
+
+/** Seconds of one in-game surface day: the real day length, compressed and clamped. */
+export function surfaceCycleSeconds(env: PlanetEnvironment): number {
+  return clamp(150 * Math.pow(env.dayLengthSec / 86_400, 0.25), 80, 300);
 }
 
 /** Temperature in °C for display. */

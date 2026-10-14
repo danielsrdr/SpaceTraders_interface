@@ -28,7 +28,13 @@ export interface LaunchEffectsOptions {
 
 const FALLBACK_OFFSETS: [number, number, number][] = [[0, -0.06, 1.15]];
 
-const STORM_WEATHER: SurfaceWeatherKind[] = ['sand-storm', 'acid-rain', 'giant-winds'];
+const STORM_WEATHER: SurfaceWeatherKind[] = [
+  'sand-storm',
+  'acid-rain',
+  'giant-winds',
+  'ash-fall',
+  'snow',
+];
 
 function heatColor(heat: number): number {
   const t = Math.min(1, Math.max(0, heat));
@@ -60,7 +66,10 @@ function resolveReactorOffsets(ship: Group): [number, number, number][] {
   return reactors.map((mesh) => [mesh.position.x, mesh.position.y, mesh.position.z]);
 }
 
-function createDustField(count: number, stormDamp: number): {
+function createDustField(
+  count: number,
+  stormDamp: number,
+): {
   points: Points;
   geometry: BufferGeometry;
   velocities: Float32Array;
@@ -105,8 +114,7 @@ export function attachLaunchExhaustEffects(
   ship.add(exhaustRoot);
 
   const plumeScale = rolePlumeScale(options.shipRole);
-  const stormDamp =
-    options.weather && STORM_WEATHER.includes(options.weather) ? 0.45 : 1;
+  const stormDamp = options.weather && STORM_WEATHER.includes(options.weather) ? 0.45 : 1;
   const offsets = resolveReactorOffsets(ship);
 
   const plumes: Mesh[] = [];

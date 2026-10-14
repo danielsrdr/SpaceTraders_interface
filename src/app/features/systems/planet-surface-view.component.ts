@@ -25,6 +25,7 @@ import {
   PCFSoftShadowMap,
   PerspectiveCamera,
   PointLight,
+  Points,
   Scene,
   Vector3,
   WebGLRenderer,
@@ -57,9 +58,10 @@ import {
   FOOTPRINT_CELL_SIZE,
 } from '../../core/state/surface-discovery.store';
 import { createPointerLockControls, FpsControls } from './three/fps-controls';
-import { fpsGravityForPlanet } from './three/celestial-mass';
+import { fpsGravityFromMs2, surfaceCycleSeconds } from './three/planet-environment';
 import { getActiveZone, SurfaceZone } from './three/surface-zones';
-import { disposeObject3D } from './three/three-dispose.util';
+import { disposeMaterial, disposeObject3D } from './three/three-dispose.util';
+import { planetSeedInt } from './three/planet-seed';
 import { buildMarketStructuresAt, isNearMarketClerk } from './three/zone-buildings.builder';
 import { buildShipyardStructuresAt } from './three/zone-shipyard.builder';
 import {
@@ -71,7 +73,7 @@ import {
   setTerrainSunDirection,
   updateTerrainMaterialTime,
 } from './three/terrain/terrain-material';
-import { buildSkydome } from './three/surface-props.builder';
+import { buildSkydome, buildStarfield } from './three/surface-props.builder';
 import type { SurfaceZoneKind } from './three/system-view-mode';
 import type { SurfaceTraitProfile, SurfaceWeatherKind } from './three/surface-trait-profile';
 import { resolveSurfaceAmbience } from './three/surface-ambience';
@@ -114,6 +116,8 @@ const FOG_DAY = new Color(0xe8c896);
 })
 export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   readonly planet = input.required<PlanetView>();
+  /** System star type; drives sky colour, light intensity and temperature. */
+  readonly starType = input<string | null>(null);
   readonly launchActive = input(false);
   readonly marketPending = input(false);
   readonly entryActive = input(true);
@@ -228,6 +232,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   private surfaceReturnPos = { x: 0, y: 0, z: 0, heading: 0 };
   private audioStarted = false;
   private lastAmbienceKey = '';
+  private skyGroup: Group | null = null;
   private baseFogNear = 60;
   private baseFogFar = 220;
   private readonly projVec = new Vector3();
@@ -236,6 +241,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
   constructor() {
     effect(() => {
       const p = this.planet();
+      this.starType();
       if (!this.sceneReady) return;
       this.loadWorld(p, untracked(this.market));
     });
@@ -309,7 +315,36 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     this.detachListeners();
     this.resizeObserver?.disconnect();
     this.clearWorld();
+    this.clearSky();
     this.renderer?.dispose();
+  }
+
+  private clearSky(): void {
+    if (!this.skyGroup) return;
+    this.scene?.remove(this.skyGroup);
+    this.skyGroup.traverse((child) => {
+      if (child instanceof Mesh || child instanceof Points) {
+        child.geometry.dispose();
+        disposeMaterial(child.material);
+      }
+    });
+    this.skyGroup = null;
+  }
+
+  /** Sky dome (or star field in thin air) from the planet environment. */
+  private buildSky(profile: SurfaceTraitProfile): void {
+    this.clearSky();
+    const env = profile.environment;
+    const group = new Group();
+    group.name = 'surface-sky';
+    if (env.atmosphere.pressureBar > 0) {
+      group.add(buildSkydome(env.sky.zenithColor, env.sky.horizonColor));
+    }
+    if (env.sky.starsByDay) {
+      group.add(buildStarfield(planetSeedInt(this.planet().name)));
+    }
+    this.skyGroup = group;
+    this.scene.add(group);
   }
 
   requestPointerLock(): void {
@@ -732,15 +767,8 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     this.sun.shadow.camera.bottom = -80;
     this.scene.add(this.sun);
 
-    this.scene.add(buildSkydome());
-
     const pointerLock = createPointerLockControls(this.camera, this.renderer.domElement);
-    this.fps = new FpsControls(
-      this.camera,
-      this.renderer.domElement,
-      pointerLock,
-      fpsGravityForPlanet(this.planet()),
-    );
+    this.fps = new FpsControls(this.camera, this.renderer.domElement, pointerLock);
     this.fps.attach();
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -764,7 +792,6 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     this.audioStarted = false;
     this.lastAmbienceKey = '';
     this.clearWorld();
-    this.fps?.setSurfaceGravity(fpsGravityForPlanet(planet));
     this.builtMarket = market;
     this.builtShipyard = this.shipyard();
     this.nearClerk.set(false);
@@ -779,25 +806,27 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
       market,
       this.shipyard(),
       this.extractDepositSymbols(this.scanDeposits()),
+      this.starType(),
     );
     this.scene.add(this.world.root);
 
     const profile = this.world.profile;
+    const env = profile.environment;
     this.activeProfile = profile;
+    this.fps?.setSurfaceGravity(fpsGravityFromMs2(env.gravityMs2));
     this.surfaceWeather.configure(profile.weatherPool, profile.hazardLevel);
     this.zone.run(() => this.hazardLevel.set(profile.hazardLevel));
+    this.buildSky(profile);
 
-    if (gas) {
-      this.scene.background = new Color(profile.skyTint);
-      this.scene.fog = new Fog(profile.fogColor, 15, 80);
-      this.baseFogNear = 15;
-      this.baseFogFar = 80;
-    } else {
-      this.scene.background = new Color(profile.skyTint);
-      this.scene.fog = new Fog(profile.fogColor, 60, 220);
-      this.baseFogNear = 60;
-      this.baseFogFar = 220;
-    }
+    // Linear fog distances from the atmosphere's opacity (0 = vacuum, 1 = opaque).
+    const density = env.sky.fogDensity;
+    this.baseFogFar = gas ? 80 : 40 + 300 * Math.pow(1 - density, 1.4);
+    this.baseFogNear = gas ? 15 : this.baseFogFar * 0.27;
+    this.scene.background = new Color(env.atmosphere.pressureBar > 0 ? profile.skyTint : 0x000000);
+    this.scene.fog = new Fog(profile.fogColor, this.baseFogNear, this.baseFogFar);
+    this.sun.color.setHex(env.sky.sunColor);
+    this.hemi.color.setHex(env.atmosphere.pressureBar > 0 ? env.sky.zenithColor : 0x222230);
+    this.hemi.groundColor.setHex(profile.sandColor);
 
     setTerrainSunDirection(
       this.world.terrainManager.material,
@@ -1423,6 +1452,7 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
     }
 
     const profile = this.activeProfile;
+    const env = profile?.environment;
     computeDayNight(
       elapsed,
       { sun: this.sun, hemi: this.hemi, ambient: this.ambient },
@@ -1436,6 +1466,15 @@ export class PlanetSurfaceViewComponent implements AfterViewInit, OnDestroy {
         baseFogFar: this.baseFogFar,
         fogDayColor: profile ? new Color(profile.fogColor) : FOG_DAY,
         weatherIntensity: this.surfaceWeather.intensity,
+        ...(env && {
+          cycleSec: surfaceCycleSeconds(env),
+          skyDay: new Color(env.sky.horizonColor),
+          vacuum: env.atmosphere.pressureBar <= 0,
+          perpetualDaylight: env.perpetualDaylight,
+          sunColor: new Color(env.sky.sunColor),
+          sunIntensityScale: env.sky.sunIntensity / 1.4,
+          ambientScale: env.sky.ambientScale,
+        }),
       },
       (x, y, z) => setTerrainSunDirection(this.world!.terrainManager.material, x, y, z),
       (boost) => this.world!.tunnels?.setNightVeinBoost(boost),

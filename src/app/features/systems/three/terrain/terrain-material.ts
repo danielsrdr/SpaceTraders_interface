@@ -21,6 +21,7 @@ const fragmentShader = /* glsl */ `
   uniform vec3 uRockColor;
   uniform vec3 uGrassColor;
   uniform float uTime;
+  uniform float uSnow;
 
   varying vec3 vWorldPos;
   varying vec3 vNormal;
@@ -50,6 +51,7 @@ const fragmentShader = /* glsl */ `
 
     vec3 base = sand * biomeSand + rock * biomeRock + grass * biomeGrass;
     base = mix(base, rock, smoothstep(0.35, 0.75, slope));
+    base = mix(base, vec3(0.93, 0.96, 1.0), smoothstep(0.55, 0.85, n.y) * uSnow);
 
     float ndl = max(dot(n, normalize(uSunDirection)), 0.0);
     float ambient = 0.28;
@@ -73,6 +75,7 @@ export function createTerrainMaterial(): ShaderMaterial {
       uRockColor: { value: new Color(0xb45309) },
       uGrassColor: { value: new Color(0x4ade80) },
       uTime: { value: 0 },
+      uSnow: { value: 0 },
     },
   });
 }
@@ -81,7 +84,12 @@ export function updateTerrainMaterialTime(material: ShaderMaterial, time: number
   material.uniforms['uTime']!.value = time;
 }
 
-export function setTerrainSunDirection(material: ShaderMaterial, x: number, y: number, z: number): void {
+export function setTerrainSunDirection(
+  material: ShaderMaterial,
+  x: number,
+  y: number,
+  z: number,
+): void {
   material.uniforms['uSunDirection']!.value.set(x, y, z).normalize();
 }
 
@@ -89,4 +97,5 @@ export function applyTerrainProfile(material: ShaderMaterial, profile: SurfaceTr
   material.uniforms['uSandColor']!.value.setHex(profile.sandColor);
   material.uniforms['uRockColor']!.value.setHex(profile.rockColor);
   material.uniforms['uGrassColor']!.value.setHex(profile.grassColor);
+  material.uniforms['uSnow']!.value = profile.environment.terrain.snowCover;
 }

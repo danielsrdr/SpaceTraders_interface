@@ -10,6 +10,8 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  Points,
+  PointsMaterial,
   Quaternion,
   Vector3,
 } from 'three';
@@ -31,7 +33,30 @@ export interface SurfacePropsResult {
   colliders: SurfaceCollider[];
 }
 
-export function buildSkydome(): Mesh {
+/** Deterministic star points on the upper hemisphere (airless / thin-air skies). */
+export function buildStarfield(seed: number, count = 700): Points {
+  const positions = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const u = noise2d(seed + 41, i, 0);
+    const v = noise2d(seed + 42, i, 1);
+    const theta = u * Math.PI * 2;
+    const y = 0.04 + v * 0.96;
+    const r = Math.sqrt(1 - y * y);
+    positions[i * 3] = Math.cos(theta) * r * 175;
+    positions[i * 3 + 1] = y * 175;
+    positions[i * 3 + 2] = Math.sin(theta) * r * 175;
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+  const points = new Points(
+    geometry,
+    new PointsMaterial({ color: 0xffffff, size: 1.4, sizeAttenuation: false, fog: false }),
+  );
+  points.name = 'starfield';
+  return points;
+}
+
+export function buildSkydome(zenithColor = 0x1e40af, horizonColor = 0xc7e4ff): Mesh {
   const geometry = new BufferGeometry();
   const verts: number[] = [];
   const colors: number[] = [];
@@ -39,8 +64,8 @@ export function buildSkydome(): Mesh {
   const rings = 16;
   const radius = 180;
 
-  const zenith = new Color(0x1e40af);
-  const horizon = new Color(0xc7e4ff);
+  const zenith = new Color(zenithColor);
+  const horizon = new Color(horizonColor);
   const tmp = new Color();
 
   for (let r = 0; r <= rings; r++) {

@@ -40,7 +40,10 @@ function projectPoiPositions(pois: SurfacePoiDefinition[]): PoiPositions {
   return positions;
 }
 
-export function buildSurfacePoiConfig(planet: PlanetView): SurfacePoiConfig {
+export function buildSurfacePoiConfig(
+  planet: PlanetView,
+  starType?: string | null,
+): SurfacePoiConfig {
   const seed = planetSeedInt(planet.name);
   const pois = resolveSurfacePois(planet);
   const poi = projectPoiPositions(pois);
@@ -56,7 +59,7 @@ export function buildSurfacePoiConfig(planet: PlanetView): SurfacePoiConfig {
     isAsteroid: isAsteroidWaypoint(planet),
     pois,
     poi,
-    profile: buildSurfaceTraitProfile(planet),
+    profile: buildSurfaceTraitProfile(planet, starType),
   };
 }
 
