@@ -6,22 +6,27 @@ import {
   RENDER_KM_PER_UNIT,
   SHIP_LENGTH_M,
 } from './physics-units';
+import { renderBodyRadius, renderSystemDistance } from './universe-physics';
 
 export type RenderContext = 'system' | 'local';
 
-/** Convert simulation distance (km) to Three.js world units. */
-export function renderDistance(simKm: number, _context: RenderContext = 'system'): number {
-  return simKm / RENDER_KM_PER_UNIT;
+/**
+ * Convert a distance (km) to Three.js world units. `system` uses the universal
+ * position map; `local` is the fine linear scale for near-body offsets (ship altitude).
+ */
+export function renderDistance(simKm: number, context: RenderContext = 'system'): number {
+  return context === 'system' ? renderSystemDistance(simKm) : simKm / RENDER_KM_PER_UNIT;
 }
 
-/** Convert a body radius (km) to render units. */
-export function renderRadius(simRadiusKm: number, context: RenderContext = 'local'): number {
-  return renderDistance(simRadiusKm, context);
+/** Rendered body radius (universal size map, identical in every system). */
+export function renderRadius(simRadiusKm: number, _context: RenderContext = 'local'): number {
+  return renderBodyRadius(simRadiusKm);
 }
 
-/** Orbit ring radius in render units for a body with the given render radius. */
+/** Orbit ring radius in render units for a body with the given sim radius. */
 export function shipOrbitRenderDistance(simRadiusKm: number): number {
-  return renderRadius(simRadiusKm + ORBIT_ALTITUDE_KM, 'local');
+  const bodyR = renderRadius(simRadiusKm);
+  return bodyR + Math.max(renderDistance(ORBIT_ALTITUDE_KM, 'local'), bodyR * 0.15);
 }
 
 /** Vertical offset placing ships above a body's equatorial plane (render units). */
@@ -34,17 +39,6 @@ export function bodyViewRenderOffset(bodyRenderRadius: number): Vector3 {
   const y = bodyRenderRadius * 0.6 + renderDistance(ORBIT_ALTITUDE_KM * 0.5, 'local');
   const z = bodyRenderRadius * 2.4 + renderDistance(ORBIT_ALTITUDE_KM * 2, 'local');
   return new Vector3(0, y, z);
-}
-
-/** Map sim position (km, X/Z plane) to render position using layout scale. */
-export function simToRender(
-  simX: number,
-  simZ: number,
-  layoutScale: number,
-  target = new Vector3(),
-): Vector3 {
-  const renderScale = layoutScale * (10_000 / RENDER_KM_PER_UNIT);
-  return target.set(simX * renderScale, 0, simZ * renderScale);
 }
 
 /**

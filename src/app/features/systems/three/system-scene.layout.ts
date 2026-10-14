@@ -1,9 +1,26 @@
 import { PlanetView, Position } from '../../../models/system.model';
 import { getSimRadiusKm } from './celestial-mass';
 import { bodyViewRenderOffset, renderRadius, shipOrbitVerticalOffset } from './render-transform';
+import {
+  API_UNIT_KM,
+  apiDistanceToKm,
+  fitStarRadiusKm,
+  renderBodyRadius,
+  renderSystemDistance,
+  starProfile,
+  SYSTEM_KM_PER_RENDER_UNIT,
+} from './universe-physics';
+
+/** Render units per API unit: one universal value, identical for every system. */
+export const API_RENDER_SCALE = API_UNIT_KM / SYSTEM_KM_PER_RENDER_UNIT;
+
+/** Smallest rendered star radius so compact remnants stay visible. */
+const MIN_STAR_RENDER_RADIUS = 3;
 
 export interface SystemLayout3d {
+  /** Universal render units per API unit (constant; kept for layout consumers). */
   scale: number;
+  /** The star sits at the API origin. */
   centerX: number;
   centerY: number;
   /** Initial display positions from API coords (updated each frame by orbit engine). */
@@ -12,58 +29,59 @@ export interface SystemLayout3d {
 }
 
 export function computeSystemLayout3d(planets: PlanetView[]): SystemLayout3d {
-  if (!planets.length) {
-    return { scale: 2, centerX: 0, centerY: 0, displayPositions: new Map(), sceneExtent: 120 };
-  }
-
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-
-  for (const planet of planets) {
-    minX = Math.min(minX, planet.position.x);
-    maxX = Math.max(maxX, planet.position.x);
-    minY = Math.min(minY, planet.position.y);
-    maxY = Math.max(maxY, planet.position.y);
-  }
-
-  const rangeX = Math.max(maxX - minX, 10);
-  const rangeY = Math.max(maxY - minY, 10);
-  const maxRange = Math.max(rangeX, rangeY);
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
-
-  const scale = Math.max(4, 520 / maxRange);
   const displayPositions = new Map<string, { x: number; z: number }>();
   let extent = 0;
 
   for (const planet of planets) {
-    const offset = apiRelativeOffset(planet, null, { scale, centerX, centerY });
+    const offset = apiRelativeOffset(planet, null, { scale: API_RENDER_SCALE });
     displayPositions.set(planet.name, offset);
-    const r = getPlanetRadius3d(planet);
-    extent = Math.max(extent, Math.hypot(offset.x, offset.z) + r);
+    extent = Math.max(extent, Math.hypot(offset.x, offset.z) + getPlanetRadius3d(planet));
   }
 
   return {
-    scale,
-    centerX,
-    centerY,
+    scale: API_RENDER_SCALE,
+    centerX: 0,
+    centerY: 0,
     displayPositions,
     sceneExtent: Math.max(extent + 40, 120),
   };
 }
 
-/** API offset from a parent waypoint (or sun at origin when parent is null). */
+/**
+ * Rendered radius of the star: the universal size map, clamped so it never
+ * swallows the innermost heliocentric orbit.
+ */
+export function starRenderRadius(
+  systemType: string | null | undefined,
+  planets: readonly PlanetView[],
+): number {
+  const star = starProfile(systemType);
+  let innermostKm = Infinity;
+  for (const p of planets) {
+    if (p.orbits?.trim()) continue;
+    innermostKm = Math.min(innermostKm, apiDistanceToKm(Math.hypot(p.position.x, p.position.y)));
+  }
+  if (!Number.isFinite(innermostKm)) {
+    return Math.max(MIN_STAR_RENDER_RADIUS, renderBodyRadius(star.radiusKm));
+  }
+  const radius = Math.max(
+    MIN_STAR_RENDER_RADIUS,
+    renderBodyRadius(fitStarRadiusKm(star, innermostKm)),
+  );
+  return Math.min(
+    radius,
+    Math.max(MIN_STAR_RENDER_RADIUS, renderSystemDistance(innermostKm) * 0.4),
+  );
+}
+
+/** API offset from a parent waypoint (or the star at the origin when parent is null). */
 export function apiRelativeOffset(
   child: PlanetView,
   parent: PlanetView | null,
-  layout: Pick<SystemLayout3d, 'scale' | 'centerX' | 'centerY'>,
+  layout: Pick<SystemLayout3d, 'scale'>,
 ): { x: number; z: number } {
-  const parentX = parent?.position.x ?? layout.centerX;
-  const parentY = parent?.position.y ?? layout.centerY;
-  const dx = child.position.x - parentX;
-  const dy = child.position.y - parentY;
+  const dx = child.position.x - (parent?.position.x ?? 0);
+  const dy = child.position.y - (parent?.position.y ?? 0);
   return {
     x: dx * layout.scale,
     z: dy * layout.scale,
@@ -92,9 +110,9 @@ export function planetWorldPosition3d(
   return worldPosition3d(planet.position, layout);
 }
 
-/** Render radius in Three.js world units, derived from sim km + type profile. */
+/** Render radius in Three.js world units (universal size map). */
 export function getPlanetRadius3d(planet: PlanetView): number {
-  return renderRadius(getSimRadiusKm(planet), 'local');
+  return renderRadius(getSimRadiusKm(planet));
 }
 
 /** Sim radius in km for physics calculations. */
