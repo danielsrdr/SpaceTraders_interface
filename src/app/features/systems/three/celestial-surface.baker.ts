@@ -15,6 +15,7 @@ import {
   WebGLRenderTarget,
 } from 'three';
 import { NOISE_GLSL } from './shader-noise.glsl';
+import type { PlanetLook } from './planet-look';
 
 export interface SurfaceBakeOptions {
   /** Surface family code, matching planetTypeCode(): 0 = rocky/ocean, 2 = moon/asteroid. */
@@ -25,7 +26,14 @@ export interface SurfaceBakeOptions {
   baseColor: Color;
   /** Equirectangular texture width (height is width / 2). */
   size?: number;
+  /** Environment-derived look; when absent the legacy generic palette is used. */
+  look?: PlanetLook;
 }
+
+const toVec = (hex: number): Vector3 => {
+  const c = new Color(hex);
+  return new Vector3(c.r, c.g, c.b);
+};
 
 /**
  * Bakes the static (non-animated) celestial surface shading into an
@@ -50,6 +58,16 @@ export class SurfaceBaker {
         uSeed: { value: 0 },
         uPlanetType: { value: 0 },
         baseColor: { value: new Vector3(1, 1, 1) },
+        uUseLook: { value: 0 },
+        uLandLow: { value: new Vector3(1, 1, 1) },
+        uLandHigh: { value: new Vector3(1, 1, 1) },
+        uLiquid: { value: new Vector3(0, 0.1, 0.3) },
+        uSeaLevel: { value: 0.5 },
+        uLiquidSpec: { value: 1 },
+        uCap: { value: new Vector3(1, 1, 1) },
+        uCapCover: { value: 0.3 },
+        uCloud: { value: new Vector3(1, 1, 1) },
+        uCloudCover: { value: 0 },
       },
       vertexShader: `
         varying vec2 vUv;
@@ -62,6 +80,16 @@ export class SurfaceBaker {
         uniform float uSeed;
         uniform int uPlanetType;
         uniform vec3 baseColor;
+        uniform float uUseLook;
+        uniform vec3 uLandLow;
+        uniform vec3 uLandHigh;
+        uniform vec3 uLiquid;
+        uniform float uSeaLevel;
+        uniform float uLiquidSpec;
+        uniform vec3 uCap;
+        uniform float uCapCover;
+        uniform vec3 uCloud;
+        uniform float uCloudCover;
         varying vec2 vUv;
 
         ${NOISE_GLSL}
@@ -78,7 +106,28 @@ export class SurfaceBaker {
           vec3 albedo = baseColor;
           float specMask = 0.0;
 
-          if (uPlanetType == 2) {
+          if (uUseLook > 0.5) {
+            float h = fbm(noiseCoord * 2.0, 6) * 0.5 + 0.5;
+            float detail = fbm(noiseCoord * 6.0, 5) * 0.5 + 0.5;
+            float rough = ridgedFbm(noiseCoord * 3.5, 5);
+            float hasSea = step(0.001, uSeaLevel);
+            float land = mix(1.0, smoothstep(uSeaLevel, uSeaLevel + 0.05, h), hasSea);
+            vec3 landCol = mix(uLandLow, uLandHigh, detail);
+            if (uPlanetType == 2) landCol *= mix(0.7, 1.15, rough);
+            vec3 liq = mix(uLiquid * 0.6, uLiquid, h);
+            albedo = mix(liq, landCol, land);
+            // Polar caps: the edge latitude falls as cover grows.
+            float latAbs = abs(sp.y);
+            float capEdge = 1.0 - uCapCover * 0.85;
+            float cap = uCapCover > 0.001 ? smoothstep(capEdge, capEdge + 0.1, latAbs + h * 0.08) : 0.0;
+            albedo = mix(albedo, uCap, cap);
+            specMask = (1.0 - land) * (1.0 - cap) * uLiquidSpec;
+            // Cloud layer (independent noise field) hides surface and gloss.
+            float cn = fbm(noiseCoord * 1.6 + vec3(7.3), 5) * 0.5 + 0.5;
+            float cloud = uCloudCover > 0.001 ? smoothstep(1.0 - uCloudCover, 1.0 - uCloudCover + 0.18, cn) : 0.0;
+            albedo = mix(albedo, uCloud, cloud * 0.9);
+            specMask *= 1.0 - cloud;
+          } else if (uPlanetType == 2) {
             float craters = ridgedFbm(noiseCoord * 3.5, 5);
             float fine = fbm(noiseCoord * 9.0, 4) * 0.5 + 0.5;
             float shade = mix(0.6, 1.15, craters);
@@ -124,7 +173,25 @@ export class SurfaceBaker {
     const u = this.material.uniforms;
     u['uSeed']!.value = options.seed;
     u['uPlanetType']!.value = options.planetType;
-    (u['baseColor']!.value as Vector3).set(options.baseColor.r, options.baseColor.g, options.baseColor.b);
+    (u['baseColor']!.value as Vector3).set(
+      options.baseColor.r,
+      options.baseColor.g,
+      options.baseColor.b,
+    );
+
+    const look = options.look;
+    u['uUseLook']!.value = look ? 1 : 0;
+    if (look) {
+      u['uLandLow']!.value = toVec(look.landLow);
+      u['uLandHigh']!.value = toVec(look.landHigh);
+      u['uLiquid']!.value = toVec(look.liquidColor);
+      u['uSeaLevel']!.value = look.seaLevel;
+      u['uLiquidSpec']!.value = look.liquidSpecular ? 1 : 0;
+      u['uCap']!.value = toVec(look.capColor);
+      u['uCapCover']!.value = look.capCover;
+      u['uCloud']!.value = toVec(look.cloudColor);
+      u['uCloudCover']!.value = look.cloudCover;
+    }
 
     const prevTarget = this.renderer.getRenderTarget();
     this.renderer.setRenderTarget(target);

@@ -10,6 +10,11 @@ export interface LitPlanetMaterialOptions {
   /** Pre-baked equirectangular surface (rgb = albedo, a = specular mask). When
    * provided, the shader samples it instead of recomputing noise each frame. */
   bakedSurface?: Texture;
+  /** Direct light colour / multiplier from the host star. */
+  sunColor?: number;
+  sunIntensity?: number;
+  /** Strength of the limb glow (0 for airless bodies). */
+  rimStrength?: number;
 }
 
 /** Maps a resolved waypoint type to the shader's surface family code. */
@@ -36,6 +41,8 @@ export function createLitPlanetMaterial(options: LitPlanetMaterialOptions): Shad
   const sunPos = options.sunPosition?.clone() ?? new Vector3(0, 0, 0);
   const seed = options.seed ?? 0;
   const baked = options.bakedSurface ?? null;
+  const sc = new Color(options.sunColor ?? 0xffffff);
+  const k = options.sunIntensity ?? 1;
 
   const uniforms: ShaderMaterial['uniforms'] = {
     sunPosition: { value: sunPos },
@@ -44,6 +51,8 @@ export function createLitPlanetMaterial(options: LitPlanetMaterialOptions): Shad
     uTime: { value: 0 },
     uSeed: { value: seed },
     uPlanetType: { value: planetTypeCode(options.planetType) },
+    uSunColor: { value: new Vector3(sc.r * k, sc.g * k, sc.b * k) },
+    uRim: { value: options.rimStrength ?? 1 },
   };
   if (baked) {
     uniforms['uSurfaceTex'] = { value: baked };
@@ -128,6 +137,8 @@ export function createLitPlanetMaterial(options: LitPlanetMaterialOptions): Shad
       uniform float uTime;
       uniform float uSeed;
       uniform int uPlanetType;
+      uniform vec3 uSunColor;
+      uniform float uRim;
       ${bakedUniformDecl}
       varying vec3 vNormal;
       varying vec3 vWorldPos;
@@ -154,7 +165,7 @@ export function createLitPlanetMaterial(options: LitPlanetMaterialOptions): Shad
         float day = smoothstep(-0.05, 0.12, ndl);
         float diff = max(ndl, 0.0);
         vec3 ambientNight = albedo * 0.03;
-        vec3 dayLit = albedo * (0.12 + diff * 1.0);
+        vec3 dayLit = albedo * (vec3(0.12) + diff * uSunColor);
         vec3 surface = mix(ambientNight, dayLit, day);
 
         if (specMask > 0.0) {
@@ -165,7 +176,7 @@ export function createLitPlanetMaterial(options: LitPlanetMaterialOptions): Shad
 
         float fres = pow(1.0 - max(dot(viewDir, N), 0.0), 3.0);
         float limb = clamp(diff * 1.2 + 0.1, 0.0, 1.0);
-        surface += glowColor * fres * (0.25 + limb * 0.7);
+        surface += glowColor * fres * (0.25 + limb * 0.7) * uRim;
 
         gl_FragColor = vec4(surface, 1.0);
       }
