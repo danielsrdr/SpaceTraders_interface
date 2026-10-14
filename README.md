@@ -55,6 +55,12 @@ Run the same checks locally:
 npm run test:ci
 ```
 
+## Coding agents
+
+Project-scoped Codex agents help with architecture, Angular UI, SpaceTraders API and
+state, Three.js, and tests/review. See [AGENTS.md](AGENTS.md) for their roles and the
+shared coding instructions, and [CLAUDE.md](CLAUDE.md) for Claude Code specifics.
+
 ## Deploy on Render
 
 Skamkraft is a static Angular SPA. Deploy it as a **Static Site** on [Render](https://render.com/):
