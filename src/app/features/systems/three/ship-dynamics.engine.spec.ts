@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import { ShipData } from '../../../models/ship.model';
 import { ShipDynamicsEngine } from './ship-dynamics.engine';
+import { EARTH_MU_KM3_S2 } from './universe-physics';
 
 function makeTransitShip(): ShipData {
   return {
@@ -70,8 +71,8 @@ describe('ShipDynamicsEngine', () => {
   it('produces circular IN_ORBIT motion over time', () => {
     const engine = new ShipDynamicsEngine();
     const parent = new Vector3(50, 0, 50);
-    const p0 = engine.sampleOrbit('S', parent, 6_000, 3e-6, 0, 0, 1);
-    const p1 = engine.sampleOrbit('S', parent, 6_000, 3e-6, 30, 0, 1);
+    const p0 = engine.sampleOrbit('S', parent, 6_000, EARTH_MU_KM3_S2, 0, 0, 1);
+    const p1 = engine.sampleOrbit('S', parent, 6_000, EARTH_MU_KM3_S2, 600, 0, 1);
     expect(p0.distanceTo(parent)).toBeCloseTo(p1.distanceTo(parent), 3);
     expect(p0.distanceTo(p1)).toBeGreaterThan(0.01);
   });
@@ -83,18 +84,7 @@ describe('ShipDynamicsEngine', () => {
     ship.nav.route = undefined;
     const parent = new Vector3(0, 0, 0);
 
-    const docked = engine.resolvePose(
-      ship,
-      null,
-      null,
-      parent,
-      6_000,
-      3e-6,
-      0,
-      0,
-      0,
-      1,
-    );
+    const docked = engine.resolvePose(ship, null, null, parent, 6_000, EARTH_MU_KM3_S2, 0, 0, 0, 1);
 
     ship.nav.status = 'IN_ORBIT';
     const orbiting = engine.resolvePose(
@@ -103,7 +93,7 @@ describe('ShipDynamicsEngine', () => {
       null,
       parent,
       6_000,
-      3e-6,
+      EARTH_MU_KM3_S2,
       15,
       0,
       0,
