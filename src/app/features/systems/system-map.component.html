@@ -13,6 +13,7 @@
           [ships]="ships()"
           [systemSymbol]="systemSymbol()"
           [systemName]="systemData()?.name ?? systemSymbol()"
+          [starType]="systemData()?.type ?? null"
           [focusPlanetName]="focusPlanetName()"
           [focusShipSymbol]="focusShipSymbol()"
           [selectedShipSymbol]="selectedShip()?.symbol ?? null"
@@ -37,6 +38,7 @@
         <app-planet-surface-view
           class="block h-full w-full"
           [planet]="planet"
+          [starType]="systemData()?.type ?? null"
           [launchActive]="viewMode() === 'launch'"
           [marketPending]="pendingMarketOpen()"
           [entryActive]="surfaceEntryActive()"

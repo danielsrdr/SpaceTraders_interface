@@ -44,19 +44,12 @@ import { PlanetView } from '../../models/system.model';
 import { RadioService } from '../../shared/services/radio.service';
 import { SpaceWeatherService, type WeatherKind } from '../../shared/services/space-weather.service';
 import { Voyage } from '../../core/state/flight-recorder.store';
-import {
-  getStableTransitProgress,
-  shipInTransit,
-  shipsOnMap,
-} from './planet-helpers';
+import { getStableTransitProgress, shipInTransit, shipsOnMap } from './planet-helpers';
 import { buildCelestialBody } from './three/celestial-body.builder';
 import { SurfaceBaker } from './three/celestial-surface.baker';
 import { updateLitPlanetSun } from './three/celestial-planet.shader';
 import { buildProceduralShip, disposeShip } from '../ships/ship-procedural.builder';
-import {
-  computeLabelLayout,
-  type PlanetScreenLabel,
-} from './three/god-view-labels';
+import { computeLabelLayout, type PlanetScreenLabel } from './three/god-view-labels';
 import {
   buildGodViewMarkers,
   syncMarkerPositions,
@@ -82,11 +75,14 @@ import { shipRenderScale } from './three/render-transform';
 import { ShipDynamicsEngine } from './three/ship-dynamics.engine';
 import { SystemOrbitEngine } from './three/system-orbit.engine';
 import {
+  API_RENDER_SCALE,
   bodyViewOffsetForRadius,
   computeSystemLayout3d,
   getPlanetSimRadiusKm,
+  starRenderRadius,
   SystemLayout3d,
 } from './three/system-scene.layout';
+import { universeTimeSec } from './three/universe-physics';
 import { LandingAnimation } from './three/landing-animation';
 import { factionColor } from '../../shared/faction-colors';
 import { computeMarkerSignature, ShipMarkerManager } from './three/ship-marker.manager';
@@ -105,13 +101,17 @@ import {
 } from './three/flight/flight-camera.controller';
 import { drawFlightRadar, shouldRedrawRadar } from './three/flight/flight-radar.renderer';
 
+/** Radius the sun group is built at before being scaled to the star's render radius. */
+const SUN_BUILD_RADIUS = 8;
+
 interface PlanetEntry {
   planet: PlanetView;
   group: Group;
   radius: number;
   simRadiusKm: number;
   spinAxis: Vector3;
-  spinRate: number;
+  /** Own-rotation angle already applied to the group (rad). */
+  spinAngle: number;
   surfaceTarget?: WebGLRenderTarget;
   /** Atmosphere/glow shells hidden when the body is far from the camera. */
   decorShells: Mesh[];
@@ -158,6 +158,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   readonly ships = input<ShipData[]>([]);
   readonly systemSymbol = input('');
   readonly systemName = input('');
+  /** API system `type`: selects the star's physical profile (μ, radius). */
+  readonly starType = input<string | null>(null);
   /** When embedded in the system layout grid, hide duplicate header chrome. */
   readonly chromeMode = input<'full' | 'embedded'>('full');
   readonly focusPlanetName = input<string | null>(null);
@@ -278,7 +280,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private readonly orbitEngine = new SystemOrbitEngine();
   private readonly shipDynamics = new ShipDynamicsEngine();
   private layout: SystemLayout3d = {
-    scale: 2,
+    scale: API_RENDER_SCALE,
     centerX: 0,
     centerY: 0,
     displayPositions: new Map(),
@@ -463,7 +465,9 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.transit.arcs.visible = true;
 
     // Restore the prior camera and re-sync the live ship.
-    this.cameraMode.set(this.cameraModeBeforeReplay === 'cockpit' ? 'flight' : this.cameraModeBeforeReplay);
+    this.cameraMode.set(
+      this.cameraModeBeforeReplay === 'cockpit' ? 'flight' : this.cameraModeBeforeReplay,
+    );
     this.updateGodModeVisibility();
     this.syncFollowShip(this.ships(), this.systemSymbol());
   }
@@ -503,30 +507,52 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     const durationSec = Math.max(1, (voyage.arrivalTime - voyage.departureTime) / 1000);
     // Seek the deterministic orbit engine to the historical-epoch time so the
     // planets sit where they were (reproducibly) for the whole trip.
-    this.orbitEngine.seekTo(voyage.departureTime / 1000 + t * durationSec);
+    this.orbitEngine.seekTo(universeTimeSec(voyage.departureTime + t * durationSec * 1000));
     this.applyOrbitalPositions();
-    this.applyBodySpin(delta);
+    this.applyBodySpin();
 
     // Fly the recorded arc between the (live-moving) endpoints.
     this.orbitEngine.getWorldPosition(voyage.originSymbol, this.shipResolveA);
     this.orbitEngine.getWorldPosition(voyage.destinationSymbol, this.shipResolveB);
     const replayShip = {
       symbol: voyage.ship,
-      registration: { name: voyage.ship, factionSymbol: '', role: this.playerShipRole ?? 'EXPLORER' },
+      registration: {
+        name: voyage.ship,
+        factionSymbol: '',
+        role: this.playerShipRole ?? 'EXPLORER',
+      },
       nav: {
         systemSymbol: voyage.systemSymbol,
         waypointSymbol: voyage.destinationSymbol,
         status: 'IN_TRANSIT' as const,
         flightMode: 'CRUISE' as const,
         route: {
-          origin: { symbol: voyage.originSymbol, type: 'PLANET', systemSymbol: voyage.systemSymbol, x: 0, y: 0 },
-          destination: { symbol: voyage.destinationSymbol, type: 'PLANET', systemSymbol: voyage.systemSymbol, x: 0, y: 0 },
+          origin: {
+            symbol: voyage.originSymbol,
+            type: 'PLANET',
+            systemSymbol: voyage.systemSymbol,
+            x: 0,
+            y: 0,
+          },
+          destination: {
+            symbol: voyage.destinationSymbol,
+            type: 'PLANET',
+            systemSymbol: voyage.systemSymbol,
+            x: 0,
+            y: 0,
+          },
           departureTime: new Date(voyage.departureTime).toISOString(),
           arrival: new Date(voyage.arrivalTime).toISOString(),
         },
       },
     } as ShipData;
-    const pose = this.shipDynamics.sampleTransit(replayShip, this.shipResolveA, this.shipResolveB, t, this.shipGroup);
+    const pose = this.shipDynamics.sampleTransit(
+      replayShip,
+      this.shipResolveA,
+      this.shipResolveB,
+      t,
+      this.shipGroup,
+    );
     this.followPosition.copy(pose.position);
     this.shipGroup.position.copy(this.followPosition);
     this.shipGroup.visible = true;
@@ -606,6 +632,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   constructor() {
     effect(() => {
       const list = this.planets();
+      this.starType();
       if (!this.sceneReady) return;
       this.rebuildPlanets(list);
     });
@@ -800,7 +827,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.scene.add(nebula);
     this.scene.add(buildStarfieldEnhanced());
 
-    const sun = buildSystemSun(Math.max(10, 8));
+    const sun = buildSystemSun(SUN_BUILD_RADIUS);
     this.sunGroup = sun.group;
     this.sunLight = sun.light;
     this.scene.add(this.sunGroup);
@@ -913,11 +940,14 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.shipGroup.visible = !!this.selectedShipSymbol();
   }
 
-  private applyBodySpin(warpedDelta: number): void {
-    if (warpedDelta <= 0) return;
+  /** Rotate each body to its engine spin angle (own rotation; tidally locked bodies follow their orbit). */
+  private applyBodySpin(): void {
     for (const entry of this.planetEntries) {
-      if (entry.spinRate === 0) continue;
-      entry.group.rotateOnAxis(entry.spinAxis, entry.spinRate * warpedDelta);
+      const angle = this.orbitEngine.getSpinAngle(entry.planet.name);
+      let step = angle - entry.spinAngle;
+      step -= Math.PI * 2 * Math.round(step / (Math.PI * 2));
+      entry.spinAngle = angle;
+      if (step !== 0) entry.group.rotateOnAxis(entry.spinAxis, step);
     }
   }
 
@@ -952,7 +982,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
     this.clearPlanets();
     this.layout = computeSystemLayout3d(planets);
-    this.orbitEngine.build(planets, this.layout);
+    this.orbitEngine.build(planets, this.layout, { systemType: this.starType() });
+    this.sunGroup?.scale.setScalar(starRenderRadius(this.starType(), planets) / SUN_BUILD_RADIUS);
     if (preserveSimTime) {
       this.orbitEngine.seekTo(savedSimTime);
     }
@@ -989,7 +1020,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
         radius: built.radius,
         simRadiusKm: getPlanetSimRadiusKm(planet),
         spinAxis: built.spinAxis,
-        spinRate: built.spinRate,
+        spinAngle: this.orbitEngine.getSpinAngle(planet.name),
         surfaceTarget: built.surfaceTarget,
         decorShells,
       };
@@ -1035,7 +1066,10 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
 
   private planetsBuildSignature(planets: PlanetView[]): string {
     return planets
-      .map((p) => `${p.name}|${p.type}|${p.position.x},${p.position.y}|${p.orbits ?? ''}`)
+      .map(
+        (p) =>
+          `${this.starType() ?? ''}|${p.name}|${p.type}|${p.position.x},${p.position.y}|${p.orbits ?? ''}`,
+      )
       .sort()
       .join(';');
   }
@@ -1070,7 +1104,12 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.shipMarkers.rebuild(onMap, selected, this.planetByName);
     this.transit.rebuild(onMap, selected, this.planetByName);
 
-    this.shipMarkers.applyPositions(this.orbitEngine, this.planetByName, this.fleetBySymbol(fleet), this.orbitEngine.currentTime);
+    this.shipMarkers.applyPositions(
+      this.orbitEngine,
+      this.planetByName,
+      this.fleetBySymbol(fleet),
+      this.orbitEngine.currentTime,
+    );
     this.syncFollowShip(fleet, systemSymbol);
   }
 
@@ -1160,11 +1199,20 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   private orientFollowShip(ship: ShipData | null): void {
     if (ship && shipInTransit(ship) && ship.nav.route) {
       const route = ship.nav.route;
-      if (this.planetByName.has(route.origin.symbol) && this.planetByName.has(route.destination.symbol)) {
+      if (
+        this.planetByName.has(route.origin.symbol) &&
+        this.planetByName.has(route.destination.symbol)
+      ) {
         const t = getStableTransitProgress(ship);
         this.orbitEngine.getWorldPosition(route.origin.symbol, this.shipResolveA);
         this.orbitEngine.getWorldPosition(route.destination.symbol, this.shipResolveB);
-        this.shipDynamics.sampleTransit(ship, this.shipResolveA, this.shipResolveB, t, this.shipGroup);
+        this.shipDynamics.sampleTransit(
+          ship,
+          this.shipResolveA,
+          this.shipResolveB,
+          t,
+          this.shipGroup,
+        );
         return;
       }
     }
@@ -1180,12 +1228,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
         const t = getStableTransitProgress(ship);
         this.orbitEngine.getWorldPosition(route.origin.symbol, this.shipResolveA);
         this.orbitEngine.getWorldPosition(route.destination.symbol, this.shipResolveB);
-        const pose = this.shipDynamics.sampleTransit(
-          ship,
-          this.shipResolveA,
-          this.shipResolveB,
-          t,
-        );
+        const pose = this.shipDynamics.sampleTransit(ship, this.shipResolveA, this.shipResolveB, t);
         return this.shipResolveResult.copy(pose.position);
       }
     }
@@ -1373,7 +1416,8 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     if (event.button !== 0) return;
     if (this.cameraMode() === 'cockpit') return;
     this.isDragging = false;
-    const moved = Math.hypot(event.clientX - this.pointerDownX, event.clientY - this.pointerDownY) > 6;
+    const moved =
+      Math.hypot(event.clientX - this.pointerDownX, event.clientY - this.pointerDownY) > 6;
     if (!moved && !this.landingActive()) {
       this.updatePointer(event);
       this.handleClick();
@@ -1490,7 +1534,10 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
     this.renderer.setPixelRatio(this.targetPixelRatio());
     this.renderer.setSize(width, height, false);
     this.composer?.setSize(width, height);
-    this.bloomPass?.setSize(Math.max(1, Math.floor(width / 2)), Math.max(1, Math.floor(height / 2)));
+    this.bloomPass?.setSize(
+      Math.max(1, Math.floor(width / 2)),
+      Math.max(1, Math.floor(height / 2)),
+    );
   }
 
   /** True only when nothing should pause the loop: not disposed, tab visible,
@@ -1529,7 +1576,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       } else {
         this.orbitEngine.tick(warpedDelta);
         this.applyOrbitalPositions();
-        this.applyBodySpin(warpedDelta);
+        this.applyBodySpin();
       }
       this.applyPlanetLod();
       this.updateAnimatedMaterials(elapsed);
@@ -1539,7 +1586,9 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
       if (this.landingActive() && this.landing.target) {
         const frame = this.landing.update(delta);
         this.shipGroup.position.copy(frame.position);
-        this.shipGroup.lookAt(this.orbitEngine.getWorldPosition(this.landing.target.name, this.tempVec));
+        this.shipGroup.lookAt(
+          this.orbitEngine.getWorldPosition(this.landing.target.name, this.tempVec),
+        );
         this.landingFade.set(frame.fade);
         if (frame.done) {
           this.zone.run(() => this.landingComplete.emit());
@@ -1614,10 +1663,7 @@ export class SystemFlightViewComponent implements AfterViewInit, OnDestroy {
   }
 
   private updateAnimatedMaterials(elapsed: number): void {
-    this.frustumMat.multiplyMatrices(
-      this.camera.projectionMatrix,
-      this.camera.matrixWorldInverse,
-    );
+    this.frustumMat.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.frustumMat);
     const farSq = this.lodFarDistanceSq();
 

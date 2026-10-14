@@ -5,11 +5,13 @@
  * Render layer: Three.js world units derived from km via RENDER_KM_PER_UNIT.
  */
 
+import { API_UNIT_KM, EARTH_GRAVITY_MS2 } from './universe-physics';
+
 /** One simulation unit equals one kilometre. */
 export const SIM_UNIT_KM = 1;
 
-/** Space Traders API coordinate units → kilometres (parent-relative orbital geometry). */
-export const API_KM_PER_UNIT = 10_000;
+/** Space Traders API coordinate units → kilometres (shared with the universe model). */
+export const API_KM_PER_UNIT = API_UNIT_KM;
 
 /** Kilometres represented by one Three.js world unit at local (near-body) scale. */
 export const RENDER_KM_PER_UNIT = 1_200;
@@ -57,8 +59,7 @@ export const MIN_SCREEN_SHIP_PX = 8;
 /** Maps surface gravity (m/s²) to FPS jump/walk feel. */
 export const FPS_GRAVITY_SCALE = 2.2;
 
-/** Standard Earth surface gravity for reference (m/s²). */
-export const EARTH_GRAVITY_MS2 = 9.80665;
+export { EARTH_GRAVITY_MS2 };
 
 /**
  * When true, ship transits use ballistic paths from ShipDynamicsEngine.
