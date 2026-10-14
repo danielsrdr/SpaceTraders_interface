@@ -1,7 +1,10 @@
 import { inject, Injectable } from '@angular/core';
 import { RadioService } from './radio.service';
 import { SoundService } from './sound.service';
-import type { SurfaceAmbienceKind, SurfaceAmbienceProfile } from '../../features/systems/three/surface-ambience';
+import type {
+  SurfaceAmbienceKind,
+  SurfaceAmbienceProfile,
+} from '../../features/systems/three/surface-ambience';
 import type { SurfaceWeatherKind } from '../../features/systems/three/surface-trait-profile';
 
 type LoopKey = SurfaceAmbienceKind | 'storm-layer' | 'market-chatter';
@@ -20,7 +23,13 @@ const LOOP_PATHS: Record<LoopKey, string> = {
   'market-chatter': '/assets/audio/surface/market-chatter.wav',
 };
 
-const STORM_WEATHER: SurfaceWeatherKind[] = ['sand-storm', 'acid-rain', 'giant-winds'];
+const STORM_WEATHER: SurfaceWeatherKind[] = [
+  'sand-storm',
+  'acid-rain',
+  'giant-winds',
+  'ash-fall',
+  'snow',
+];
 
 /**
  * Ambient surface audio loops loaded from assets and crossfaded on biome / weather

@@ -1,8 +1,13 @@
 import { PlanetView, hasTrait } from '../../../models/system.model';
 import { isAsteroidWaypoint, isGasGiantWaypoint } from '../planet-helpers';
 import type { BiomeKind } from './terrain/terrain-height';
+import {
+  planetEnvironment,
+  type PlanetEnvironment,
+  type SurfaceWeatherKind as EnvironmentWeatherKind,
+} from './planet-environment';
 
-export type SurfaceWeatherKind = 'sand-storm' | 'acid-rain' | 'aurora' | 'giant-winds';
+export type SurfaceWeatherKind = EnvironmentWeatherKind;
 
 export interface SurfaceTraitProfile {
   biomeBias: Partial<Record<BiomeKind, number>>;
@@ -14,75 +19,78 @@ export interface SurfaceTraitProfile {
   sandColor: number;
   rockColor: number;
   grassColor: number;
+  /** Physical environment the profile was derived from (plain data, worker-safe). */
+  environment: PlanetEnvironment;
 }
 
-const BASE_PROFILE: SurfaceTraitProfile = {
-  biomeBias: {},
-  fogColor: 0xe8c896,
-  skyTint: 0xc7e4ff,
-  propDensity: 1,
-  weatherPool: ['sand-storm'],
-  hazardLevel: 0,
-  sandColor: 0xd4a574,
-  rockColor: 0xb45309,
-  grassColor: 0x4ade80,
+/** Environment terrain hints → the five walkable biomes. */
+const BIOME_OF_HINT: Record<string, BiomeKind> = {
+  jungle: 'jungle',
+  swamp: 'jungle',
+  shore: 'sand',
+  desert: 'desert',
+  saltflat: 'desert',
+  sand: 'sand',
+  ice: 'rocky',
+  lava: 'rocky',
+  rocky: 'rocky',
+  industrial: 'industrial',
 };
 
-function cloneProfile(): SurfaceTraitProfile {
-  return {
-    ...BASE_PROFILE,
-    biomeBias: { ...BASE_PROFILE.biomeBias },
-    weatherPool: [...BASE_PROFILE.weatherPool],
-  };
-}
+/**
+ * Derive walkable-surface palette, biome bias, sky/fog and weather pool from the
+ * physical environment (type + traits + host star) plus a few legacy trait tweaks.
+ */
+export function buildSurfaceTraitProfile(
+  planet: PlanetView,
+  starType?: string | null,
+): SurfaceTraitProfile {
+  const environment = planetEnvironment(planet, { starType });
+  const { terrain, sky } = environment;
 
-/** Derive walkable-surface palette, biome bias, and weather pool from API traits. */
-export function buildSurfaceTraitProfile(planet: PlanetView): SurfaceTraitProfile {
-  const profile = cloneProfile();
+  const biomeBias: Partial<Record<BiomeKind, number>> = {};
+  for (const [hint, weight] of Object.entries(terrain.biomeBias)) {
+    const biome = BIOME_OF_HINT[hint];
+    if (biome && weight) biomeBias[biome] = (biomeBias[biome] ?? 0) + weight;
+  }
+
+  const profile: SurfaceTraitProfile = {
+    biomeBias,
+    fogColor: sky.fogColor,
+    skyTint: sky.horizonColor,
+    propDensity: 1,
+    weatherPool: [...environment.weatherPool],
+    hazardLevel: environment.hazardLevel,
+    sandColor: terrain.sandColor,
+    rockColor: terrain.rockColor,
+    grassColor: terrain.grassColor,
+    environment,
+  };
 
   if (isGasGiantWaypoint(planet)) {
-    profile.fogColor = 0x4c1d95;
-    profile.skyTint = 0x4c1d95;
-    profile.weatherPool = ['giant-winds'];
     profile.propDensity = 0.35;
-    profile.sandColor = 0xa78bfa;
+    profile.weatherPool = ['giant-winds'];
     return profile;
   }
 
   if (isAsteroidWaypoint(planet)) {
-    profile.biomeBias.rocky = 0.5;
     profile.propDensity = 1.3;
-    profile.fogColor = 0x78716c;
-    profile.rockColor = 0x57534e;
-    profile.weatherPool = ['sand-storm'];
+    profile.weatherPool = [];
     return profile;
   }
 
-  if (hasTrait(planet, 'JUNGLE')) {
-    profile.biomeBias.jungle = (profile.biomeBias.jungle ?? 0) + 0.4;
-    profile.fogColor = 0x86efac;
-    profile.grassColor = 0x22c55e;
-  }
-
-  if (hasTrait(planet, 'FROZEN')) {
-    profile.biomeBias.rocky = (profile.biomeBias.rocky ?? 0) + 0.35;
-    profile.fogColor = 0x93c5fd;
-    profile.skyTint = 0xbfdbfe;
-    profile.sandColor = 0xd1d5db;
-    profile.rockColor = 0x9ca3af;
-    profile.weatherPool.push('aurora');
-  }
+  profile.propDensity = 0.4 + Math.min(1.2, terrain.floraDensity) * 0.9;
 
   if (hasTrait(planet, 'HAZARDOUS')) {
-    profile.hazardLevel = 0.7;
+    profile.hazardLevel = Math.max(profile.hazardLevel, 0.7);
     profile.fogColor = 0xf97316;
     profile.weatherPool.push('acid-rain');
   }
 
   if (hasTrait(planet, 'MINERAL_DEPOSITS')) {
     profile.propDensity += 0.4;
-    profile.biomeBias.industrial = (profile.biomeBias.industrial ?? 0) + 0.2;
-    profile.biomeBias.rocky = (profile.biomeBias.rocky ?? 0) + 0.2;
+    biomeBias.industrial = (biomeBias.industrial ?? 0) + 0.2;
+    biomeBias.rocky = (biomeBias.rocky ?? 0) + 0.2;
   }
 
   profile.weatherPool = [...new Set(profile.weatherPool)];

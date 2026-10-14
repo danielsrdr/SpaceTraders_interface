@@ -116,9 +116,7 @@ export class TerrainHeightField {
     switch (biome) {
       case 'desert':
       case 'sand':
-        h +=
-          fbm2d(seed, x * 0.025, z * 0.025, 4) * 18 +
-          fbm2d(seed + 1, x * 0.08, z * 0.08, 2) * 5;
+        h += fbm2d(seed, x * 0.025, z * 0.025, 4) * 18 + fbm2d(seed + 1, x * 0.08, z * 0.08, 2) * 5;
         break;
       case 'rocky':
       case 'industrial':
@@ -138,13 +136,51 @@ export class TerrainHeightField {
     return Math.min(Math.max(h, 1), MAX_TERRAIN_HEIGHT);
   }
 
+  /** Gravity-scaled relief, impact craters and canyons from the planet environment. */
+  private applyEnvironmentRelief(x: number, z: number, base: number): number {
+    const { isGas, seed } = this.config;
+    if (isGas) return base;
+    const terrain = this.config.profile.environment.terrain;
+
+    let h = 5 + (base - 5) * terrain.reliefScale;
+
+    if (terrain.craterDensity > 0) {
+      const cell = 36;
+      const cx = Math.floor(x / cell);
+      const cz = Math.floor(z / cell);
+      for (let i = -1; i <= 1; i++) {
+        for (let j = -1; j <= 1; j++) {
+          const gx = cx + i;
+          const gz = cz + j;
+          if (noise2d(seed + 21, gx, gz) > terrain.craterDensity * 0.55) continue;
+          const radius = 5 + noise2d(seed + 22, gx, gz) * 9;
+          const px = (gx + 0.15 + noise2d(seed + 23, gx, gz) * 0.7) * cell;
+          const pz = (gz + 0.15 + noise2d(seed + 24, gx, gz) * 0.7) * cell;
+          const d = Math.hypot(x - px, z - pz) / radius;
+          if (d >= 1.35) continue;
+          const bowl = d < 1 ? (1 - d * d) * radius * 0.28 * terrain.craterDepth : 0;
+          const rim = Math.exp(-Math.pow((d - 1.05) * 4, 2)) * radius * 0.07 * terrain.craterDepth;
+          h += rim - bowl;
+        }
+      }
+    }
+
+    if (terrain.canyonStrength > 0) {
+      const ridge = Math.abs(fbm2d(seed + 31, x * 0.02, z * 0.02, 3));
+      const cut = 1 - Math.min(1, ridge / 0.08);
+      h -= cut * cut * 9 * terrain.canyonStrength;
+    }
+
+    return Math.min(Math.max(h, 1), MAX_TERRAIN_HEIGHT);
+  }
+
   getHeight(x: number, z: number): number {
     const dist = Math.hypot(x, z);
     if (dist > WORLD_RADIUS) {
       return MAX_TERRAIN_HEIGHT + 8;
     }
 
-    let h = this.getBaseHeight(x, z);
+    let h = this.applyEnvironmentRelief(x, z, this.getBaseHeight(x, z));
 
     if (this.pitConfig) {
       const pitH = samplePitHeight(x, z, this.pitConfig, h);

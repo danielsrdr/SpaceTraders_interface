@@ -1,7 +1,10 @@
 import { DecimalPipe } from '@angular/common';
 import { Component, computed, effect, ElementRef, input, viewChild } from '@angular/core';
 import type { SurfaceWeatherKind } from '../three/surface-trait-profile';
-import { FOOTPRINT_CELL_SIZE, TOTAL_WALKABLE_CELLS } from '../../../core/state/surface-discovery.store';
+import {
+  FOOTPRINT_CELL_SIZE,
+  TOTAL_WALKABLE_CELLS,
+} from '../../../core/state/surface-discovery.store';
 import { WORLD_RADIUS } from '../three/terrain/terrain-height';
 
 export interface ExoPoiCompass {
@@ -44,6 +47,8 @@ export class ExoSuitHudComponent {
     if (evt === 'sand-storm') return 'sand';
     if (evt === 'acid-rain') return 'acid';
     if (evt === 'giant-winds') return 'wind';
+    if (evt === 'ash-fall') return 'sand';
+    if (evt === 'snow') return 'wind';
     return null;
   });
 
