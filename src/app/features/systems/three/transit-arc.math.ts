@@ -173,7 +173,8 @@ export function computeTransitDeviation(
   if (gNormal.lengthSq() < 1e-12) gNormal.set(1, 0, 0);
   gNormal.normalize();
 
-  const hop = HOP_ARC_FRACTION * len * (1 - smoothstep01(SHORT_HOP_UNITS / 2, SHORT_HOP_UNITS, len));
+  const hop =
+    HOP_ARC_FRACTION * len * (1 - smoothstep01(SHORT_HOP_UNITS / 2, SHORT_HOP_UNITS, len));
   gDev.copy(gNormal).multiplyScalar(hop);
   target.copy(gDev);
 
